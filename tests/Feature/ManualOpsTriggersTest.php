@@ -26,6 +26,13 @@ class ManualOpsTriggersTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->fakeLiveProviderResponses();
+    }
+
     public function test_authenticated_users_can_manually_refetch_weather_for_a_city(): void
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
@@ -107,7 +114,7 @@ class ManualOpsTriggersTest extends TestCase
         $this->assertDatabaseHas('news_events', [
             'city_id' => $originCity->id,
             'airport_id' => $originAirport->id,
-            'title' => 'Operational update for CUN travel to destination',
+            'title' => 'Operational update for monitored travel',
         ]);
     }
 
@@ -187,19 +194,20 @@ class ManualOpsTriggersTest extends TestCase
         $travelDate = '2026-03-25';
 
         $response = $this->actingAs($user)
+            ->followingRedirects()
             ->post(route('admin.ops.triggers.risk'), [
                 'route_id' => $route->id,
                 'travel_date' => $travelDate,
             ]);
 
         $response
-            ->assertRedirect(route('admin.ops.index'))
-            ->assertSessionHas('status', 'Risk recompute completed.')
-            ->assertSessionHas('manual_tool_result', function (array $result): bool {
-                return $result['tool'] === 'recompute risk'
-                    && isset($result['details']['score'])
-                    && isset($result['details']['risk_level']);
-            });
+            ->assertOk()
+            ->assertSee('Risk recompute completed.')
+            ->assertSee('Risk Evaluation')
+            ->assertSee('Recommended Action')
+            ->assertSee('Top Drivers')
+            ->assertSee('Probable No-show Uplift')
+            ->assertSee('Estimate of short-term travel disruption risk and probable no-show uplift');
 
         $this->assertDatabaseHas('risk_query_snapshots', [
             'route_id' => $route->id,
@@ -309,13 +317,14 @@ class ManualOpsTriggersTest extends TestCase
      */
     private function setUpWeatherFixture(): array
     {
-        Provider::create([
+        $provider = Provider::create([
             'name' => 'OpenWeather',
             'slug' => 'openweather',
             'service' => 'weather',
             'driver' => 'rest',
             'active' => true,
         ]);
+        $this->configureLiveProvider($provider);
 
         [$country, $originCity, $originAirport] = $this->setUpGeography();
 
@@ -337,13 +346,14 @@ class ManualOpsTriggersTest extends TestCase
      */
     private function setUpNewsFixture(): array
     {
-        Provider::create([
+        $provider = Provider::create([
             'name' => 'NewsAPI',
             'slug' => 'newsapi',
             'service' => 'news',
             'driver' => 'rest',
             'active' => true,
         ]);
+        $this->configureLiveProvider($provider);
 
         [$country, $originCity, $originAirport] = $this->setUpGeography();
 
@@ -365,13 +375,15 @@ class ManualOpsTriggersTest extends TestCase
      */
     private function setUpFlightFixture(): array
     {
-        Provider::create([
+        $provider = Provider::create([
             'name' => 'FlightStats',
             'slug' => 'flightstats',
             'service' => 'flights',
             'driver' => 'rest',
             'active' => true,
         ]);
+        $this->configureLiveProvider($provider);
+        $this->configureLiveProvider($provider);
 
         [, $originCity, $originAirport, $destinationCity, $destinationAirport] = $this->setUpGeography(withDestination: true);
 
@@ -584,6 +596,8 @@ class ManualOpsTriggersTest extends TestCase
             'iata' => 'JFK',
             'icao' => 'KJFK',
             'timezone' => 'America/New_York',
+            'latitude' => 40.6413,
+            'longitude' => -73.7781,
         ]);
 
         $mx = Country::create([
@@ -602,6 +616,8 @@ class ManualOpsTriggersTest extends TestCase
             'iata' => 'CUN',
             'icao' => 'MMUN',
             'timezone' => 'America/Cancun',
+            'latitude' => 21.0365,
+            'longitude' => -86.8771,
         ]);
 
         $route = Route::create([
@@ -704,6 +720,8 @@ class ManualOpsTriggersTest extends TestCase
             'iata' => 'CUN',
             'icao' => 'MMUN',
             'timezone' => 'America/Cancun',
+            'latitude' => 21.0365,
+            'longitude' => -86.8771,
         ]);
 
         if (! $withDestination) {
@@ -722,6 +740,8 @@ class ManualOpsTriggersTest extends TestCase
             'iata' => 'MID',
             'icao' => 'MMMD',
             'timezone' => 'America/Merida',
+            'latitude' => 20.9370,
+            'longitude' => -89.6577,
         ]);
 
         return [$country, $originCity, $originAirport, $destinationCity, $destinationAirport];

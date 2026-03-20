@@ -177,6 +177,42 @@
             display: grid;
             gap: 16px;
         }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+        .detail-card {
+            padding: 14px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .detail-card strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 18px;
+        }
+        .detail-card small {
+            color: #cbd5e1;
+            display: block;
+            line-height: 1.45;
+        }
+        .result-list,
+        .driver-list {
+            margin: 0;
+            padding-left: 18px;
+            display: grid;
+            gap: 8px;
+        }
+        .driver-list strong {
+            font-size: 15px;
+        }
+        .risk-meta {
+            margin: 0;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+        }
         .score-metrics {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -286,6 +322,9 @@
 <main>
     @php
         $manualToolResult = session('manual_tool_result');
+        $riskEvaluationResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 'recompute risk'
+            ? $manualToolResult['details']
+            : null;
         $queryCityScoreResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 'query city score'
             ? $manualToolResult['details']
             : null;
@@ -318,7 +357,116 @@
 
         @if ($manualToolResult)
             <div class="result">
-                @if ($queryCityScoreResult)
+                @if ($riskEvaluationResult)
+                    @php
+                        $resolvedOrigin = $riskEvaluationResult['resolved']['origin'] ?? [];
+                        $resolvedDestination = $riskEvaluationResult['resolved']['destination'] ?? [];
+                        $originLabel = $resolvedOrigin['airport']['iata']
+                            ?? $resolvedOrigin['city']['name']
+                            ?? 'Unknown origin';
+                        $destinationLabel = $resolvedDestination['airport']['iata']
+                            ?? $resolvedDestination['city']['name']
+                            ?? 'Unknown destination';
+                        $routeLabel = $originLabel.' → '.$destinationLabel;
+                        $drivers = collect($riskEvaluationResult['drivers'] ?? [])->take(4);
+                        $componentAges = collect($riskEvaluationResult['freshness']['component_ages'] ?? []);
+                    @endphp
+                    <div class="score-summary">
+                        <div>
+                            <strong>Risk Evaluation</strong>
+                            <p>
+                                {{ $routeLabel }}
+                                for {{ $riskEvaluationResult['resolved']['travel_date'] ?? 'n/a' }}.
+                                This reflects {{ str_replace('_', ' ', $riskEvaluationResult['assessment_type'] ?? 'short term travel disruption risk') }}.
+                            </p>
+                            <p class="score-note">{{ $riskEvaluationResult['product_framing'] ?? 'Estimate of short-term travel disruption risk and probable no-show uplift.' }}</p>
+                        </div>
+
+                        <div class="detail-grid">
+                            <div class="detail-card">
+                                <span>Score</span>
+                                <strong>{{ number_format((float) ($riskEvaluationResult['score'] ?? 0), 2) }}</strong>
+                                <small>Risk level: {{ strtoupper((string) ($riskEvaluationResult['risk_level'] ?? 'unknown')) }}</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Confidence</span>
+                                <strong>{{ strtoupper((string) ($riskEvaluationResult['confidence']['level'] ?? 'unknown')) }}</strong>
+                                <small>{{ number_format(((float) ($riskEvaluationResult['confidence']['score'] ?? 0)) * 100, 0) }}% weighted coverage</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Data Freshness</span>
+                                <strong>{{ strtoupper((string) ($riskEvaluationResult['freshness']['level'] ?? 'unknown')) }}</strong>
+                                <small>
+                                    Stalest signal:
+                                    {{ $riskEvaluationResult['freshness']['minutes_since_stalest_signal'] ?? 'n/a' }}
+                                    min old
+                                </small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Probable No-show Uplift</span>
+                                <strong>{{ number_format((float) ($riskEvaluationResult['probable_no_show_uplift']['estimate_percent'] ?? 0), 1) }}%</strong>
+                                <small>
+                                    Range {{ number_format((float) ($riskEvaluationResult['probable_no_show_uplift']['range_percent']['low'] ?? 0), 1) }}%
+                                    to {{ number_format((float) ($riskEvaluationResult['probable_no_show_uplift']['range_percent']['high'] ?? 0), 1) }}%
+                                </small>
+                            </div>
+                        </div>
+
+                        <p class="risk-meta">
+                            <strong>Recommended Action</strong><br>
+                            {{ $riskEvaluationResult['recommended_action']['summary'] ?? 'Continue monitoring this itinerary.' }}
+                            @if (!empty($riskEvaluationResult['recommended_action']['primary_driver']))
+                                Primary driver: {{ str_replace('_', ' ', $riskEvaluationResult['recommended_action']['primary_driver']) }}.
+                            @endif
+                        </p>
+
+                        <div class="grid dual">
+                            <div class="panel">
+                                <h3>Top Drivers</h3>
+                                <ol class="driver-list">
+                                    @forelse ($drivers as $driver)
+                                        <li>
+                                            <strong>{{ ucfirst(str_replace('_', ' ', $driver['factor'] ?? 'unknown')) }}</strong>
+                                            score {{ number_format((float) ($driver['component_score'] ?? 0), 2) }},
+                                            weighted contribution {{ number_format((float) ($driver['weighted_contribution'] ?? 0), 2) }},
+                                            source {{ $driver['source'] ?? 'unknown' }}
+                                        </li>
+                                    @empty
+                                        <li>No driver details available.</li>
+                                    @endforelse
+                                </ol>
+                            </div>
+
+                            <div class="panel">
+                                <h3>Freshness By Factor</h3>
+                                <ul class="result-list">
+                                    @forelse ($componentAges as $factor => $age)
+                                        <li>
+                                            {{ ucfirst(str_replace('_', ' ', (string) $factor)) }}:
+                                            @if (!empty($age['as_of']))
+                                                {{ $age['minutes_old'] }} min old
+                                                ({{ \Illuminate\Support\Carbon::parse($age['as_of'])->toDayDateTimeString() }})
+                                            @else
+                                                no recent signal
+                                            @endif
+                                        </li>
+                                    @empty
+                                        <li>No freshness detail available.</li>
+                                    @endforelse
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3>Evaluation Summary</h3>
+                            <ul class="result-list">
+                                @foreach (($riskEvaluationResult['explanations'] ?? []) as $message)
+                                    <li>{{ $message }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    </div>
+                @elseif ($queryCityScoreResult)
                     @php
                         $scoreScope = $queryCityScoreResult['score_scope'] ?? 'city';
                     @endphp
@@ -748,12 +896,17 @@
                     <th>Provider</th>
                     <th>Source</th>
                     <th>Status</th>
+                    <th>Output</th>
                     <th>Timing</th>
                     <th>Error</th>
                 </tr>
                 </thead>
                 <tbody>
                 @forelse ($ingestionRuns as $run)
+                    @php
+                        $payloadCount = $run->response_meta['payload_count'] ?? $run->raw_payloads_count ?? 0;
+                        $recordsCreated = $run->response_meta['normalized_events'] ?? null;
+                    @endphp
                     <tr>
                         <td>{{ $run->provider?->name ?? 'Unknown provider' }}</td>
                         <td>{{ strtoupper($run->source_type) }}</td>
@@ -763,6 +916,10 @@
                             </span>
                         </td>
                         <td class="meta">
+                            Payloads: {{ $payloadCount }}<br>
+                            Records created: {{ $recordsCreated ?? 'n/a' }}
+                        </td>
+                        <td class="meta">
                             Started: {{ $run->started_at?->toDayDateTimeString() ?? 'n/a' }}<br>
                             Finished: {{ $run->finished_at?->toDayDateTimeString() ?? 'In progress' }}
                         </td>
@@ -770,7 +927,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="5" class="empty">No ingestion runs recorded yet.</td>
+                        <td colspan="6" class="empty">No ingestion runs recorded yet.</td>
                     </tr>
                 @endforelse
                 </tbody>

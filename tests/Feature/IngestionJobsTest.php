@@ -21,6 +21,13 @@ class IngestionJobsTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->fakeLiveProviderResponses();
+    }
+
     public function test_fetch_weather_data_job_creates_run_raw_payload_and_dispatches_normalization(): void
     {
         Bus::fake();
@@ -96,6 +103,7 @@ class IngestionJobsTest extends TestCase
             'driver' => 'rest',
             'active' => true,
         ]);
+        $this->configureLiveProvider($provider);
 
         $country = Country::create([
             'name' => 'Mexico',
@@ -118,6 +126,8 @@ class IngestionJobsTest extends TestCase
             'iata' => 'CUN',
             'icao' => 'MMUN',
             'timezone' => 'America/Cancun',
+            'latitude' => 21.0365,
+            'longitude' => -86.8771,
         ]);
 
         $destinationAirport = Airport::create([
@@ -127,6 +137,8 @@ class IngestionJobsTest extends TestCase
             'iata' => 'MID',
             'icao' => 'MMMD',
             'timezone' => 'America/Merida',
+            'latitude' => 20.9370,
+            'longitude' => -89.6577,
         ]);
 
         $watchTarget = WatchTarget::create([

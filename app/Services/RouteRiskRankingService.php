@@ -14,6 +14,7 @@ class RouteRiskRankingService
 {
     public function __construct(
         private readonly RiskScoringService $riskScoringService,
+        private readonly MonitoredRouteService $monitoredRouteService,
     ) {
     }
 
@@ -26,8 +27,11 @@ class RouteRiskRankingService
         $normalizedTravelDate = $travelDate instanceof CarbonInterface
             ? $travelDate->copy()->startOfDay()
             : Carbon::parse($travelDate)->startOfDay();
-        $routes = $this->routesForDestination($resolvedDestination)
-            ->take($limit);
+        $maxRoutes = min($limit, (int) config('operations.v1_route_risk_limit', 10));
+        $routes = $this->monitoredRouteService->prioritized(
+            $this->routesForDestination($resolvedDestination),
+            $maxRoutes
+        );
 
         $ranked = $routes
             ->map(function (Route $route) use ($normalizedTravelDate) {
@@ -73,6 +77,13 @@ class RouteRiskRankingService
             ],
             'travel_date' => $normalizedTravelDate->toDateString(),
             'count' => $ranked->count(),
+            'scope' => [
+                'travel_window_hours' => (int) config('operations.v1_risk_window_hours', 72),
+                'monitored_routes_only' => true,
+                'entity_level' => 'route_and_airport',
+                'max_routes' => $maxRoutes,
+                'scoring_mode' => 'deterministic_rules',
+            ],
             'data' => $ranked->all(),
         ];
     }
@@ -142,9 +153,21 @@ class RouteRiskRankingService
             'origin' => $assessment['resolved']['origin'],
             'destination' => $assessment['resolved']['destination'],
             'travel_date' => $travelDate->toDateString(),
+            'assessment_type' => $assessment['assessment_type'],
+            'scoring_mode' => $assessment['scoring_mode'] ?? 'deterministic_rules',
+            'product_framing' => $assessment['product_framing'],
+            'scope' => $assessment['scope'] ?? [
+                'travel_window_hours' => (int) config('operations.v1_risk_window_hours', 72),
+                'monitored_routes_only' => true,
+                'entity_level' => 'route_and_airport',
+            ],
             'score' => $assessment['score'],
             'risk_level' => $assessment['risk_level'],
             'confidence' => $assessment['confidence'],
+            'freshness' => $assessment['freshness'],
+            'drivers' => $assessment['drivers'],
+            'probable_no_show_uplift' => $assessment['probable_no_show_uplift'],
+            'recommended_action' => $assessment['recommended_action'],
             'factors' => [
                 'components' => $assessment['components'],
                 'weighted_contributions' => $assessment['weighted_contributions'],
@@ -184,10 +207,37 @@ class RouteRiskRankingService
                 ] : null,
             ],
             'travel_date' => $travelDate->toDateString(),
+            'assessment_type' => $snapshot->factors['assessment_type'] ?? 'short_term_travel_disruption_risk',
+            'scoring_mode' => $snapshot->factors['scoring_mode'] ?? 'deterministic_rules',
+            'product_framing' => $snapshot->factors['product_framing']
+                ?? 'Estimate of short-term travel disruption risk and probable no-show uplift, not a deterministic no-show prediction.',
+            'scope' => $snapshot->factors['scope'] ?? [
+                'travel_window_hours' => (int) config('operations.v1_risk_window_hours', 72),
+                'monitored_routes_only' => true,
+                'entity_level' => 'route_and_airport',
+            ],
             'score' => $snapshot->score,
             'risk_level' => $snapshot->risk_level,
             'confidence' => $snapshot->factors['confidence'] ?? [
                 'level' => $snapshot->confidence_level,
+            ],
+            'freshness' => $snapshot->factors['freshness'] ?? [
+                'level' => 'unknown',
+            ],
+            'drivers' => $snapshot->factors['drivers'] ?? [],
+            'probable_no_show_uplift' => $snapshot->factors['probable_no_show_uplift'] ?? [
+                'estimate_percent' => null,
+                'range_percent' => [
+                    'low' => null,
+                    'high' => null,
+                ],
+                'method' => 'heuristic_from_disruption_risk',
+                'framing' => 'Directional estimate of probable no-show uplift from short-term disruption risk, not a deterministic no-show forecast.',
+            ],
+            'recommended_action' => $snapshot->factors['recommended_action'] ?? [
+                'code' => 'manual_review',
+                'summary' => 'Review this market manually before changing inventory or pricing because the stored decision context is incomplete.',
+                'primary_driver' => null,
             ],
             'factors' => [
                 'components' => $snapshot->factors['components'] ?? [],

@@ -4,12 +4,20 @@ namespace Tests\Feature;
 
 use App\Models\Provider;
 use App\Models\User;
+use Database\Seeders\BasicGeographySeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class AdminProviderCrudTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->fakeLiveProviderResponses();
+    }
 
     public function test_guest_users_are_redirected_away_from_provider_admin_routes(): void
     {
@@ -179,6 +187,8 @@ class AdminProviderCrudTest extends TestCase
 
     public function test_authenticated_users_can_run_a_provider_api_smoke_test(): void
     {
+        $this->seed(BasicGeographySeeder::class);
+
         $user = User::factory()->create();
         $provider = Provider::create([
             'name' => 'OpenWeather',
@@ -187,6 +197,7 @@ class AdminProviderCrudTest extends TestCase
             'driver' => 'rest',
             'active' => true,
         ]);
+        $this->configureLiveProvider($provider);
         $csrf = 'provider-test-token';
 
         $this->actingAs($user)

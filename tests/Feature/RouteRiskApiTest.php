@@ -11,6 +11,7 @@ use App\Models\Route;
 use App\Models\RouteIndicator;
 use App\Models\ScoringProfile;
 use App\Models\User;
+use App\Models\WatchTarget;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -21,7 +22,7 @@ class RouteRiskApiTest extends TestCase
 
     public function test_route_risk_endpoint_requires_sanctum_authentication(): void
     {
-        $this->getJson('/api/routes/risk?destination=CUN&date=2026-03-25')
+        $this->getJson('/api/routes/risk?destination=CUN&date=2026-03-22')
             ->assertUnauthorized();
     }
 
@@ -43,12 +44,17 @@ class RouteRiskApiTest extends TestCase
         [$highestRiskRoute, $lowerRiskRoute] = $this->setUpRankedRoutes();
 
         $this->withToken($token)
-            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-25')
+            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-22')
             ->assertOk()
             ->assertJson([
                 'meta' => [
-                    'travel_date' => '2026-03-25',
+                    'travel_date' => '2026-03-22',
                     'count' => 2,
+                    'scope' => [
+                        'travel_window_hours' => 72,
+                        'monitored_routes_only' => true,
+                        'scoring_mode' => 'deterministic_rules',
+                    ],
                     'destination' => [
                         'airport' => [
                             'iata' => 'CUN',
@@ -59,8 +65,13 @@ class RouteRiskApiTest extends TestCase
                     [
                         'rank' => 1,
                         'route_id' => $highestRiskRoute->id,
-                        'score' => 6.72,
+                        'assessment_type' => 'short_term_travel_disruption_risk',
+                        'scoring_mode' => 'deterministic_rules',
+                        'score' => 6.77,
                         'risk_level' => 'medium',
+                        'recommended_action' => [
+                            'code' => 'watch_and_adjust',
+                        ],
                         'origin' => [
                             'airport' => [
                                 'iata' => 'MID',
@@ -70,7 +81,7 @@ class RouteRiskApiTest extends TestCase
                     [
                         'rank' => 2,
                         'route_id' => $lowerRiskRoute->id,
-                        'score' => 3.52,
+                        'score' => 3.57,
                         'risk_level' => 'low',
                         'origin' => [
                             'airport' => [
@@ -88,9 +99,17 @@ class RouteRiskApiTest extends TestCase
                         'origin',
                         'destination',
                         'travel_date',
+                        'assessment_type',
+                        'scoring_mode',
+                        'product_framing',
+                        'scope',
                         'score',
                         'risk_level',
                         'confidence',
+                        'freshness',
+                        'drivers',
+                        'probable_no_show_uplift',
+                        'recommended_action',
                         'factors',
                         'summaries',
                         'snapshot',
@@ -100,6 +119,7 @@ class RouteRiskApiTest extends TestCase
                     'destination',
                     'travel_date',
                     'count',
+                    'scope',
                 ],
             ]);
 
@@ -114,16 +134,28 @@ class RouteRiskApiTest extends TestCase
         $this->setUpRankedRoutes();
 
         $this->withToken($token)
-            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-25')
+            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-22')
             ->assertOk();
 
         $firstSnapshots = RiskQuerySnapshot::query()->count();
 
         $this->withToken($token)
-            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-25')
+            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-22')
             ->assertOk();
 
         $this->assertSame($firstSnapshots, RiskQuerySnapshot::query()->count());
+    }
+
+    public function test_route_risk_endpoint_rejects_dates_outside_the_v1_window(): void
+    {
+        Carbon::setTestNow('2026-03-20 09:00:00');
+
+        $token = User::factory()->create()->createToken('api-test')->plainTextToken;
+
+        $this->withToken($token)
+            ->getJson('/api/routes/risk?destination=CUN&date=2026-03-25')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['date']);
     }
 
     protected function tearDown(): void
@@ -174,6 +206,11 @@ class RouteRiskApiTest extends TestCase
             'name' => 'Mexico City',
         ]);
 
+        $ignoredCity = City::create([
+            'country_id' => $country->id,
+            'name' => 'Tulum',
+        ]);
+
         $destinationAirport = Airport::create([
             'country_id' => $country->id,
             'city_id' => $destinationCity->id,
@@ -201,6 +238,15 @@ class RouteRiskApiTest extends TestCase
             'timezone' => 'America/Mexico_City',
         ]);
 
+        $ignoredAirport = Airport::create([
+            'country_id' => $country->id,
+            'city_id' => $ignoredCity->id,
+            'name' => 'Tulum International Airport',
+            'iata' => 'TQO',
+            'icao' => 'MMTL',
+            'timezone' => 'America/Cancun',
+        ]);
+
         $highestRiskRoute = Route::create([
             'origin_airport_id' => $midAirport->id,
             'destination_airport_id' => $destinationAirport->id,
@@ -211,6 +257,32 @@ class RouteRiskApiTest extends TestCase
             'origin_airport_id' => $mexAirport->id,
             'destination_airport_id' => $destinationAirport->id,
             'active' => true,
+        ]);
+
+        $ignoredRoute = Route::create([
+            'origin_airport_id' => $ignoredAirport->id,
+            'destination_airport_id' => $destinationAirport->id,
+            'active' => true,
+        ]);
+
+        WatchTarget::create([
+            'origin_city_id' => $midCity->id,
+            'origin_airport_id' => $midAirport->id,
+            'destination_city_id' => $destinationCity->id,
+            'destination_airport_id' => $destinationAirport->id,
+            'enabled' => true,
+            'monitoring_priority' => 10,
+            'date_window_days' => 3,
+        ]);
+
+        WatchTarget::create([
+            'origin_city_id' => $mexCity->id,
+            'origin_airport_id' => $mexAirport->id,
+            'destination_city_id' => $destinationCity->id,
+            'destination_airport_id' => $destinationAirport->id,
+            'enabled' => true,
+            'monitoring_priority' => 7,
+            'date_window_days' => 3,
         ]);
 
         AirportIndicator::create([
@@ -246,10 +318,21 @@ class RouteRiskApiTest extends TestCase
             'supporting_factors' => ['source' => 'mex'],
         ]);
 
+        AirportIndicator::create([
+            'airport_id' => $ignoredAirport->id,
+            'as_of' => '2026-03-20 08:00:00',
+            'window_hours' => 24,
+            'weather_score' => 9.0,
+            'flight_score' => 9.0,
+            'news_score' => 9.0,
+            'combined_score' => 9.0,
+            'supporting_factors' => ['source' => 'ignored'],
+        ]);
+
         RouteIndicator::create([
             'route_id' => $highestRiskRoute->id,
             'as_of' => '2026-03-20 08:00:00',
-            'travel_date' => '2026-03-25',
+            'travel_date' => '2026-03-22',
             'window_hours' => 24,
             'flight_score' => 8.0,
             'news_score' => 6.0,
@@ -260,12 +343,23 @@ class RouteRiskApiTest extends TestCase
         RouteIndicator::create([
             'route_id' => $lowerRiskRoute->id,
             'as_of' => '2026-03-20 08:00:00',
-            'travel_date' => '2026-03-25',
+            'travel_date' => '2026-03-22',
             'window_hours' => 24,
             'flight_score' => 4.0,
             'news_score' => 2.0,
             'combined_score' => 3.0,
             'supporting_factors' => ['route' => 'mex-cun'],
+        ]);
+
+        RouteIndicator::create([
+            'route_id' => $ignoredRoute->id,
+            'as_of' => '2026-03-20 08:00:00',
+            'travel_date' => '2026-03-22',
+            'window_hours' => 24,
+            'flight_score' => 9.0,
+            'news_score' => 9.0,
+            'combined_score' => 9.0,
+            'supporting_factors' => ['route' => 'ignored-cun'],
         ]);
 
         return [$highestRiskRoute, $lowerRiskRoute];

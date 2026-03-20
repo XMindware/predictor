@@ -93,6 +93,10 @@ class AdminOpsPanelTest extends TestCase
             'status' => 'failed',
             'started_at' => now()->subMinutes(20),
             'finished_at' => now()->subMinutes(18),
+            'response_meta' => [
+                'payload_count' => 2,
+                'normalized_events' => 7,
+            ],
             'error_message' => 'Provider timed out.',
         ]);
 
@@ -166,6 +170,8 @@ class AdminOpsPanelTest extends TestCase
             ->assertSee('News 5.00')
             ->assertSee('2 events')
             ->assertSee('4 events')
+            ->assertSee('Payloads: 2')
+            ->assertSee('Records created: 7')
             ->assertSee('RuntimeException: Queue worker failed while processing payload.');
     }
 }

@@ -43,6 +43,7 @@ class RouteRiskController extends Controller
                 'destination' => $ranking['destination'],
                 'travel_date' => $ranking['travel_date'],
                 'count' => $ranking['count'],
+                'scope' => $ranking['scope'],
             ],
         ]);
     }

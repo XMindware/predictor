@@ -40,6 +40,7 @@ class OpsController extends Controller
             'watchTargets' => $activeWatchTargets->take(25),
             'ingestionRuns' => IngestionRun::query()
                 ->with('provider')
+                ->withCount('rawPayloads')
                 ->latest('started_at')
                 ->limit(25)
                 ->get(),

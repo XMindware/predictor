@@ -32,16 +32,10 @@ class RiskScoringService
         }
 
         $normalizedTravelDate = $this->normalizeTravelDate($travelDate);
-        $originResolution = $this->resolveEndpoint($origin);
-        $destinationResolution = $this->resolveEndpoint($destination);
-        $route = $this->resolveRoute($originResolution, $destinationResolution);
-
-        if ($route) {
-            $originResolution['airport'] ??= $route->originAirport;
-            $originResolution['city'] ??= $route->originAirport?->city;
-            $destinationResolution['airport'] ??= $route->destinationAirport;
-            $destinationResolution['city'] ??= $route->destinationAirport?->city;
-        }
+        $context = $this->resolveContext($origin, $destination);
+        $originResolution = $context['origin'];
+        $destinationResolution = $context['destination'];
+        $route = $context['route'];
 
         $originAirportIndicator = $this->latestAirportIndicator($originResolution['airport'] ?? null);
         $destinationAirportIndicator = $this->latestAirportIndicator($destinationResolution['airport'] ?? null);
@@ -80,11 +74,19 @@ class RiskScoringService
         $finalScore = round($finalScore, 2);
         $riskLevel = $this->riskLevel($finalScore, $profile->thresholds);
         $confidence = $this->confidence($components, $weights, $normalizedTravelDate !== null);
+        $freshness = $this->freshness($components);
+        $drivers = $this->drivers($components, $weightedContributions);
+        $probableNoShowUplift = $this->probableNoShowUplift($finalScore, $confidence);
+        $recommendedAction = $this->recommendedAction($riskLevel, $confidence, $freshness, $drivers);
 
         $result = [
+            'assessment_type' => 'short_term_travel_disruption_risk',
+            'scoring_mode' => 'deterministic_rules',
+            'product_framing' => 'Estimate of short-term travel disruption risk and probable no-show uplift, not a deterministic no-show prediction.',
             'score' => $finalScore,
             'risk_level' => $riskLevel,
             'confidence' => $confidence,
+            'freshness' => $freshness,
             'profile' => [
                 'name' => $profile->name,
                 'version' => $profile->version,
@@ -103,7 +105,17 @@ class RiskScoringService
             ],
             'components' => $components,
             'weighted_contributions' => $weightedContributions,
-            'explanations' => $this->explanations($components, $riskLevel, $confidence),
+            'drivers' => $drivers,
+            'probable_no_show_uplift' => $probableNoShowUplift,
+            'recommended_action' => $recommendedAction,
+            'explanations' => $this->explanations(
+                $components,
+                $riskLevel,
+                $confidence,
+                $freshness,
+                $probableNoShowUplift,
+                $recommendedAction
+            ),
         ];
 
         $snapshot = $this->persistSnapshot(
@@ -121,6 +133,35 @@ class RiskScoringService
         ];
 
         return $result;
+    }
+
+    /**
+     * @param  Airport|City|array<string, mixed>|string  $origin
+     * @param  Airport|City|array<string, mixed>|string  $destination
+     * @return array{
+     *     origin: array{airport: ?Airport, city: ?City},
+     *     destination: array{airport: ?Airport, city: ?City},
+     *     route: ?Route
+     * }
+     */
+    public function resolveContext(Airport|City|array|string $origin, Airport|City|array|string $destination): array
+    {
+        $originResolution = $this->resolveEndpoint($origin);
+        $destinationResolution = $this->resolveEndpoint($destination);
+        $route = $this->resolveRoute($originResolution, $destinationResolution);
+
+        if ($route) {
+            $originResolution['airport'] ??= $route->originAirport;
+            $originResolution['city'] ??= $route->originAirport?->city;
+            $destinationResolution['airport'] ??= $route->destinationAirport;
+            $destinationResolution['city'] ??= $route->destinationAirport?->city;
+        }
+
+        return [
+            'origin' => $originResolution,
+            'destination' => $destinationResolution,
+            'route' => $route,
+        ];
     }
 
     /**
@@ -460,10 +501,173 @@ class RiskScoringService
 
     /**
      * @param  array<string, array<string, mixed>>  $components
+     * @return array<string, mixed>
+     */
+    private function freshness(array $components): array
+    {
+        $ages = collect($components)
+            ->reject(fn (array $component, string $factor): bool => $factor === 'date_proximity')
+            ->map(function (array $component, string $factor): array {
+                $asOf = $component['as_of'] ?? null;
+
+                if (! $asOf) {
+                    return [
+                        'factor' => $factor,
+                        'as_of' => null,
+                        'minutes_old' => null,
+                    ];
+                }
+
+                $timestamp = Carbon::parse((string) $asOf);
+
+                return [
+                    'factor' => $factor,
+                    'as_of' => $timestamp->toIso8601String(),
+                    'minutes_old' => now()->diffInMinutes($timestamp, false) * -1,
+                ];
+            })
+            ->values();
+
+        $minutes = $ages
+            ->pluck('minutes_old')
+            ->filter(fn (mixed $value): bool => $value !== null)
+            ->map(fn (mixed $value): int => max(0, (int) $value))
+            ->values();
+
+        if ($minutes->isEmpty()) {
+            return [
+                'level' => 'unknown',
+                'latest_signal_at' => null,
+                'stalest_signal_at' => null,
+                'minutes_since_latest_signal' => null,
+                'minutes_since_stalest_signal' => null,
+                'component_ages' => $ages->keyBy('factor')->all(),
+            ];
+        }
+
+        $latestMinutes = (int) $minutes->min();
+        $stalestMinutes = (int) $minutes->max();
+        $knownAges = $ages
+            ->filter(fn (array $age): bool => $age['minutes_old'] !== null)
+            ->values();
+
+        return [
+            'level' => match (true) {
+                $stalestMinutes <= 180 => 'fresh',
+                $stalestMinutes <= 720 => 'aging',
+                default => 'stale',
+            },
+            'latest_signal_at' => $knownAges
+                ->sortBy('minutes_old')
+                ->first()['as_of'] ?? null,
+            'stalest_signal_at' => $knownAges
+                ->sortByDesc('minutes_old')
+                ->first()['as_of'] ?? null,
+            'minutes_since_latest_signal' => $latestMinutes,
+            'minutes_since_stalest_signal' => $stalestMinutes,
+            'component_ages' => $ages->keyBy('factor')->all(),
+        ];
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $components
+     * @param  array<string, float>  $weightedContributions
+     * @return list<array<string, mixed>>
+     */
+    private function drivers(array $components, array $weightedContributions): array
+    {
+        return collect($weightedContributions)
+            ->map(function (float $contribution, string $factor) use ($components): array {
+                $component = $components[$factor] ?? [];
+
+                return [
+                    'factor' => $factor,
+                    'component_score' => round((float) ($component['score'] ?? 0), 2),
+                    'weighted_contribution' => round($contribution, 2),
+                    'source' => (string) ($component['source'] ?? 'unknown'),
+                    'data_present' => (bool) ($component['data_present'] ?? false),
+                    'as_of' => $component['as_of'] ?? null,
+                ];
+            })
+            ->sortByDesc('weighted_contribution')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $confidence
+     * @return array<string, mixed>
+     */
+    private function probableNoShowUplift(float $score, array $confidence): array
+    {
+        $estimate = round($score * 0.3, 1);
+        $spread = match ($confidence['level'] ?? 'low') {
+            'high' => 0.4,
+            'medium' => 0.8,
+            default => 1.2,
+        };
+
+        return [
+            'estimate_percent' => $estimate,
+            'range_percent' => [
+                'low' => round(max(0, $estimate - $spread), 1),
+                'high' => round($estimate + $spread, 1),
+            ],
+            'method' => 'heuristic_from_disruption_risk',
+            'framing' => 'Directional estimate of probable no-show uplift from short-term disruption risk, not a deterministic no-show forecast.',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $confidence
+     * @param  array<string, mixed>  $freshness
+     * @param  list<array<string, mixed>>  $drivers
+     * @return array<string, mixed>
+     */
+    private function recommendedAction(string $riskLevel, array $confidence, array $freshness, array $drivers): array
+    {
+        $primaryDriver = $drivers[0]['factor'] ?? null;
+
+        if (($freshness['level'] ?? 'unknown') === 'stale' || ($confidence['level'] ?? 'low') === 'low') {
+            return [
+                'code' => 'manual_review',
+                'summary' => 'Review this market manually before changing inventory or pricing because coverage or freshness is weak.',
+                'primary_driver' => $primaryDriver,
+            ];
+        }
+
+        return match ($riskLevel) {
+            'high' => [
+                'code' => 'tighten_exposure',
+                'summary' => 'Reduce exposure on this market and prepare for disruption-driven no-show uplift.',
+                'primary_driver' => $primaryDriver,
+            ],
+            'medium' => [
+                'code' => 'watch_and_adjust',
+                'summary' => 'Keep this market under active watch and adjust commercial decisions if the main drivers worsen.',
+                'primary_driver' => $primaryDriver,
+            ],
+            default => [
+                'code' => 'hold_strategy',
+                'summary' => 'Hold the current strategy and keep monitoring for changes in disruption signals.',
+                'primary_driver' => $primaryDriver,
+            ],
+        };
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $components
      * @param  array<string, mixed>  $confidence
      * @return list<string>
      */
-    private function explanations(array $components, string $riskLevel, array $confidence): array
+    private function explanations(
+        array $components,
+        string $riskLevel,
+        array $confidence,
+        array $freshness,
+        array $probableNoShowUplift,
+        array $recommendedAction,
+    ): array
     {
         $messages = [];
 
@@ -487,6 +691,31 @@ class RiskScoringService
             'Confidence is %s with %.0f%% weighted data coverage.',
             $confidence['level'],
             ((float) ($confidence['score'] ?? 0)) * 100
+        );
+        $messages[] = match ($freshness['level'] ?? 'unknown') {
+            'fresh' => sprintf(
+                'Data freshness is strong; the stalest contributing signal is %d minutes old.',
+                (int) ($freshness['minutes_since_stalest_signal'] ?? 0)
+            ),
+            'aging' => sprintf(
+                'Data is aging; the stalest contributing signal is %d minutes old.',
+                (int) ($freshness['minutes_since_stalest_signal'] ?? 0)
+            ),
+            'stale' => sprintf(
+                'Data is stale; the stalest contributing signal is %d minutes old.',
+                (int) ($freshness['minutes_since_stalest_signal'] ?? 0)
+            ),
+            default => 'Data freshness could not be established from the available signals.',
+        };
+        $messages[] = sprintf(
+            'Probable no-show uplift is estimated at %.1f%%, with a directional range of %.1f%% to %.1f%%.',
+            (float) ($probableNoShowUplift['estimate_percent'] ?? 0),
+            (float) ($probableNoShowUplift['range_percent']['low'] ?? 0),
+            (float) ($probableNoShowUplift['range_percent']['high'] ?? 0),
+        );
+        $messages[] = sprintf(
+            'Recommended action: %s.',
+            (string) ($recommendedAction['summary'] ?? 'Continue monitoring this itinerary.')
         );
 
         return $messages;
@@ -549,9 +778,17 @@ class RiskScoringService
             'risk_level' => $result['risk_level'],
             'confidence_level' => $result['confidence']['level'],
             'factors' => [
+                'assessment_type' => $result['assessment_type'],
+                'scoring_mode' => $result['scoring_mode'],
+                'product_framing' => $result['product_framing'],
+                'scope' => $result['scope'] ?? null,
                 'components' => $result['components'],
                 'weighted_contributions' => $result['weighted_contributions'],
                 'confidence' => $result['confidence'],
+                'freshness' => $result['freshness'],
+                'drivers' => $result['drivers'],
+                'probable_no_show_uplift' => $result['probable_no_show_uplift'],
+                'recommended_action' => $result['recommended_action'],
                 'explanations' => $result['explanations'],
                 'profile' => $result['profile'],
             ],

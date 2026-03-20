@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Validator;
 
 class RiskAssessmentRequest extends FormRequest
@@ -40,6 +41,25 @@ class RiskAssessmentRequest extends FormRequest
 
                 if (blank($this->input('destination_city')) && blank($this->input('destination_airport'))) {
                     $validator->errors()->add('destination', 'A destination city or destination airport is required.');
+                }
+
+                if (filled($this->input('travel_date'))) {
+                    $travelDate = Carbon::parse((string) $this->input('travel_date'))->startOfDay();
+                    $earliestDate = now()->startOfDay();
+                    $latestDate = now()
+                        ->addHours((int) config('operations.v1_risk_window_hours', 72))
+                        ->endOfDay();
+
+                    if ($travelDate->lt($earliestDate) || $travelDate->gt($latestDate)) {
+                        $validator->errors()->add(
+                            'travel_date',
+                            sprintf(
+                                'V1 risk assessment only supports travel dates between %s and %s.',
+                                $earliestDate->toDateString(),
+                                $latestDate->toDateString()
+                            )
+                        );
+                    }
                 }
             },
         ];
