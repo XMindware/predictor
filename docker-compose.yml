@@ -1,18 +1,24 @@
+x-laravel-service: &laravel-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  working_dir: /var/www
+  volumes:
+    - .:/var/www
+    - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+  networks:
+    - predictor_network
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *laravel-service
     container_name: predictor_app
-    restart: unless-stopped
-    working_dir: /var/www
-    volumes:
-      - .:/var/www
-      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
-    networks:
-      - predictor_network
-    depends_on:
-      - db
 
   webserver:
     image: nginx:alpine
@@ -28,19 +34,64 @@ services:
     depends_on:
       - app
 
+  queue:
+    <<: *laravel-service
+    container_name: predictor_queue
+    command:
+      - php
+      - artisan
+      - queue:work
+      - redis
+      - --sleep=3
+      - --tries=3
+      - --max-time=3600
+    stop_grace_period: 60s
+
+  scheduler:
+    <<: *laravel-service
+    container_name: predictor_scheduler
+    command:
+      - php
+      - artisan
+      - schedule:work
+
   db:
-    image: mysql:8.0
+    image: postgres:16-alpine
     container_name: predictor_db
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${DB_DATABASE:-predictor}
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
-      MYSQL_USER: ${DB_USERNAME:-predictor}
+      POSTGRES_DB: ${DB_DATABASE:-predictor}
+      POSTGRES_USER: ${DB_USERNAME:-predictor}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - dbdata:/var/lib/mysql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-predictor} -d ${DB_DATABASE:-predictor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - predictor_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: predictor_redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - predictor_network
 
@@ -49,5 +100,7 @@ networks:
     driver: bridge
 
 volumes:
-  dbdata:
+  pgdata:
+    driver: local
+  redisdata:
     driver: local

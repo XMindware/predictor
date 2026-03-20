@@ -1,6 +1,6 @@
 # Predictor
 
-Predictor de no shows — a Laravel 11 application with Docker and MySQL.
+Predictor de no shows — a Laravel 11 application with Docker, PostgreSQL, Redis, a queue worker, and a scheduler.
 
 ## Quick Start with Docker
 
@@ -18,7 +18,7 @@ cd predictor
 cp .env.example .env
 
 # 3. Start the Docker containers
-docker compose up -d
+docker compose up -d --build
 
 # 4. Install PHP dependencies
 docker compose exec app composer install
@@ -37,8 +37,11 @@ The application will be available at **http://localhost:8080**.
 | Service    | Container            | Port        |
 |------------|----------------------|-------------|
 | PHP-FPM    | predictor_app        | —           |
+| Queue      | predictor_queue      | —           |
+| Scheduler  | predictor_scheduler  | —           |
 | Nginx      | predictor_webserver  | 8080:80     |
-| MySQL 8.0  | predictor_db         | 3306:3306   |
+| PostgreSQL | predictor_db         | 5432:5432   |
+| Redis      | predictor_redis      | 6379:6379   |
 
 ### Useful Commands
 
