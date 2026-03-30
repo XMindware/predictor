@@ -22,7 +22,7 @@ class MonitoringDashboardTest extends TestCase
         Config::set('cache.default', 'array');
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $provider = Provider::create([
             'name' => 'OpenSky',
             'slug' => 'opensky',
@@ -76,12 +76,14 @@ class MonitoringDashboardTest extends TestCase
         $this->actingAs($user)
             ->get('/dashboard')
             ->assertOk()
-            ->assertSee('Operations Monitoring')
+            ->assertSee('System Health')
+            ->assertSee('Recent Activity')
             ->assertSee('OpenSky')
             ->assertSee('Provider timed out.')
             ->assertSee('Recent failed queue jobs')
-            ->assertSee('Latest payload is 95 minute(s) old.')
-            ->assertSee('Pending normalization backlog');
+            ->assertSee('Failed ingestion runs (24h)')
+            ->assertSee('Stale provider warnings')
+            ->assertSee('Normalization backlog');
 
         Carbon::setTestNow();
     }

@@ -14,8 +14,8 @@ class HealthEndpointTest extends TestCase
     {
         Config::set('app.env', 'testing');
         Config::set('app.name', 'Predictor');
-        Config::set('database.default', 'pgsql');
-        Config::set('database.connections.pgsql.database', 'predictor');
+        Config::set('database.default', 'mysql');
+        Config::set('database.connections.mysql.database', 'predictor');
         Config::set('database.redis.client', 'phpredis');
         Config::set('database.redis.default.host', 'redis');
         Config::set('queue.default', 'redis');
@@ -50,6 +50,13 @@ class HealthEndpointTest extends TestCase
             '2026_03_19_216000_create_route_indicators_table',
             '2026_03_19_217000_create_scoring_profiles_table',
             '2026_03_19_218000_create_risk_query_snapshots_table',
+            '2026_03_29_000001_add_role_to_users_table',
+            '2026_03_29_000002_create_membership_plans_table',
+            '2026_03_29_000003_create_user_memberships_table',
+            '2026_03_29_000004_create_monitored_destinations_table',
+            '2026_03_30_000001_widen_news_events_title_to_text',
+            '2026_03_30_000002_create_rss_news_sources_table',
+            '2026_03_30_000003_reattribute_news_events_to_destination_city',
         ]);
         Redis::shouldReceive('connection->ping')->once()->withNoArgs()->andReturn('PONG');
 
@@ -62,7 +69,7 @@ class HealthEndpointTest extends TestCase
                 'checks' => [
                     'database' => [
                         'status' => 'ok',
-                        'connection' => 'pgsql',
+                        'connection' => 'mysql',
                         'database' => 'predictor',
                     ],
                     'redis' => [
@@ -73,7 +80,7 @@ class HealthEndpointTest extends TestCase
                     ],
                     'migrations' => [
                         'status' => 'ok',
-                        'ran' => 21,
+                        'ran' => 28,
                         'pending' => 0,
                     ],
                     'queue' => [

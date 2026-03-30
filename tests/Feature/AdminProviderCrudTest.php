@@ -27,7 +27,7 @@ class AdminProviderCrudTest extends TestCase
 
     public function test_authenticated_users_can_create_provider_records_with_credentials_and_configs(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $csrf = 'provider-create-token';
 
         $this->actingAs($user)
@@ -78,7 +78,7 @@ class AdminProviderCrudTest extends TestCase
 
     public function test_authenticated_users_can_update_provider_records_and_sync_nested_rows(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $provider = Provider::create([
             'name' => 'OpenWeather',
             'slug' => 'openweather',
@@ -148,7 +148,7 @@ class AdminProviderCrudTest extends TestCase
 
     public function test_authenticated_users_can_delete_provider_records(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $provider = Provider::create([
             'name' => 'NewsAPI',
             'slug' => 'newsapi',
@@ -189,7 +189,7 @@ class AdminProviderCrudTest extends TestCase
     {
         $this->seed(BasicGeographySeeder::class);
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $provider = Provider::create([
             'name' => 'OpenWeather',
             'slug' => 'openweather',

@@ -70,7 +70,7 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
     /**
      * @param  Collection<int, WatchTarget>  $watchTargets
      */
-    private function ingestProvider(ProviderAdapterRegistry $registry, Provider $provider, Collection $watchTargets): void
+    protected function ingestProvider(ProviderAdapterRegistry $registry, Provider $provider, Collection $watchTargets): void
     {
         $ingestionRun = $provider->ingestionRuns()->create([
             'source_type' => $this->sourceType(),

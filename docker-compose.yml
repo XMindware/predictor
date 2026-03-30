@@ -56,19 +56,20 @@ services:
       - schedule:work
 
   db:
-    image: postgres:16-alpine
+    image: mysql:8.4
     container_name: predictor_db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_DATABASE:-predictor}
-      POSTGRES_USER: ${DB_USERNAME:-predictor}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_DATABASE: ${DB_DATABASE:-predictor}
+      MYSQL_USER: ${DB_USERNAME:-predictor}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-predictor} -d ${DB_DATABASE:-predictor}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -100,7 +101,7 @@ networks:
     driver: bridge
 
 volumes:
-  pgdata:
+  mysqldata:
     driver: local
   redisdata:
     driver: local

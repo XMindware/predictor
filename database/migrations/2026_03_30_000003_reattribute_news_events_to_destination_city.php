@@ -21,37 +21,93 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // PostgreSQL: cast the JSONB field to integer for the JOIN.
-        // The watch_target_id is stored as a JSON number inside
-        // raw_provider_payloads.payload.
-        DB::statement("
-            UPDATE news_events ne
-            SET
-                city_id    = COALESCE(wt.destination_city_id,    wt.origin_city_id),
-                airport_id = COALESCE(wt.destination_airport_id, wt.origin_airport_id)
-            FROM raw_provider_payloads rpp
-            JOIN watch_targets wt
-                ON wt.id = (rpp.payload->>'watch_target_id')::int
-            WHERE ne.raw_payload_id = rpp.id
-              AND rpp.source_type   = 'news'
-              AND wt.destination_city_id IS NOT NULL
-        ");
+        $this->updateNewsEventAttribution(
+            fn (object $watchTarget): array => [
+                'city_id' => $watchTarget->destination_city_id ?? $watchTarget->origin_city_id,
+                'airport_id' => $watchTarget->destination_airport_id ?? $watchTarget->origin_airport_id,
+            ],
+        );
     }
 
     public function down(): void
     {
-        // Reverse: restore origin attribution for route watch targets.
-        DB::statement("
-            UPDATE news_events ne
-            SET
-                city_id    = wt.origin_city_id,
-                airport_id = wt.origin_airport_id
-            FROM raw_provider_payloads rpp
-            JOIN watch_targets wt
-                ON wt.id = (rpp.payload->>'watch_target_id')::int
-            WHERE ne.raw_payload_id = rpp.id
-              AND rpp.source_type   = 'news'
-              AND wt.destination_city_id IS NOT NULL
-        ");
+        $this->updateNewsEventAttribution(
+            fn (object $watchTarget): array => [
+                'city_id' => $watchTarget->origin_city_id,
+                'airport_id' => $watchTarget->origin_airport_id,
+            ],
+        );
+    }
+
+    /**
+     * Re-attribute news events using query-builder updates so the migration
+     * runs on PostgreSQL, MySQL, and SQLite.
+     *
+     * @param  callable(object): array{city_id: mixed, airport_id: mixed}  $attributes
+     */
+    private function updateNewsEventAttribution(callable $attributes): void
+    {
+        DB::table('raw_provider_payloads')
+            ->select(['id', 'payload'])
+            ->where('source_type', 'news')
+            ->orderBy('id')
+            ->chunkById(100, function ($payloads) use ($attributes): void {
+                $watchTargetIds = $payloads
+                    ->map(fn (object $payload): ?int => $this->extractWatchTargetId($payload->payload))
+                    ->filter()
+                    ->unique()
+                    ->values();
+
+                if ($watchTargetIds->isEmpty()) {
+                    return;
+                }
+
+                $watchTargets = DB::table('watch_targets')
+                    ->select([
+                        'id',
+                        'origin_city_id',
+                        'origin_airport_id',
+                        'destination_city_id',
+                        'destination_airport_id',
+                    ])
+                    ->whereIn('id', $watchTargetIds)
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($payloads as $payload) {
+                    $watchTargetId = $this->extractWatchTargetId($payload->payload);
+
+                    if ($watchTargetId === null) {
+                        continue;
+                    }
+
+                    $watchTarget = $watchTargets->get($watchTargetId);
+
+                    if ($watchTarget === null || $watchTarget->destination_city_id === null) {
+                        continue;
+                    }
+
+                    DB::table('news_events')
+                        ->where('raw_payload_id', $payload->id)
+                        ->update($attributes($watchTarget));
+                }
+            });
+    }
+
+    private function extractWatchTargetId(mixed $payload): ?int
+    {
+        if (is_string($payload)) {
+            $payload = json_decode($payload, true);
+        } elseif (is_object($payload)) {
+            $payload = (array) $payload;
+        }
+
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $watchTargetId = $payload['watch_target_id'] ?? null;
+
+        return is_numeric($watchTargetId) ? (int) $watchTargetId : null;
     }
 };

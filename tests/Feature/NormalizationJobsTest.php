@@ -110,8 +110,8 @@ class NormalizationJobsTest extends TestCase
 
         $this->assertDatabaseHas('news_events', [
             'raw_payload_id' => $payload->id,
-            'city_id' => $watchTarget->origin_city_id,
-            'airport_id' => $watchTarget->origin_airport_id,
+            'city_id' => $watchTarget->destination_city_id,
+            'airport_id' => $watchTarget->destination_airport_id,
             'category' => 'weather',
             'title' => 'Storm warning issued for Cancun routes',
         ]);

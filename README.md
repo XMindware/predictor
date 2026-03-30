@@ -28,7 +28,7 @@ Internal admin:
 ## Stack
 
 - Laravel 11
-- PostgreSQL
+- MySQL 8
 - Redis
 - Sanctum for API tokens
 - queue worker for ingestion and aggregation jobs

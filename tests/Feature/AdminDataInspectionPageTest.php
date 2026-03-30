@@ -28,7 +28,7 @@ class AdminDataInspectionPageTest extends TestCase
 
     public function test_authenticated_users_can_inspect_weather_news_and_flight_data_for_a_city_and_date(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
 
         $weatherProvider = Provider::create([
             'name' => 'OpenWeather',

@@ -17,9 +17,11 @@ class UserManagementController extends Controller
         $query = User::with('activeMembership.plan')->orderBy('created_at', 'desc');
 
         if ($search = $request->input('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'ilike', "%{$search}%")
-                  ->orWhere('email', 'ilike', "%{$search}%");
+            $normalizedSearch = '%'.mb_strtolower($search).'%';
+
+            $query->where(function ($q) use ($normalizedSearch) {
+                $q->whereRaw('LOWER(name) LIKE ?', [$normalizedSearch])
+                  ->orWhereRaw('LOWER(email) LIKE ?', [$normalizedSearch]);
             });
         }
 

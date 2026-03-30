@@ -37,7 +37,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [$originCity, $originAirport] = $this->setUpWeatherFixture();
 
         $this->actingAs($user)
@@ -65,7 +65,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [, , $route] = $this->setUpFlightFixture();
 
         $this->actingAs($user)
@@ -105,7 +105,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [, , $route] = $this->setUpFlightFixture();
 
         $this->actingAs($user)
@@ -129,7 +129,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [$originCity, $originAirport] = $this->setUpNewsFixture();
 
         $this->actingAs($user)
@@ -157,7 +157,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [$provider, $rawPayload, $route, $originCity, $originAirport] = $this->setUpIndicatorFixture();
 
         WeatherEvent::create([
@@ -224,7 +224,7 @@ class ManualOpsTriggersTest extends TestCase
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         [$originAirport, $destinationAirport, $route] = $this->setUpRiskFixture();
         $travelDate = '2026-03-25';
 
@@ -257,7 +257,7 @@ class ManualOpsTriggersTest extends TestCase
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)
@@ -279,7 +279,7 @@ class ManualOpsTriggersTest extends TestCase
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)
@@ -312,7 +312,7 @@ class ManualOpsTriggersTest extends TestCase
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)
@@ -340,7 +340,7 @@ class ManualOpsTriggersTest extends TestCase
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)

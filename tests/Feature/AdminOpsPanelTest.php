@@ -30,7 +30,7 @@ class AdminOpsPanelTest extends TestCase
 
     public function test_authenticated_users_can_inspect_ops_datasets_from_the_operations_panel(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
 
         $provider = Provider::create([
             'name' => 'OpenSky',

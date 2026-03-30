@@ -22,7 +22,7 @@ class AdminRouteCrudTest extends TestCase
     {
         $this->seed(BasicGeographySeeder::class);
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $originAirport = Airport::query()->where('iata', 'JFK')->firstOrFail();
         $destinationAirport = Airport::query()->where('iata', 'CUN')->firstOrFail();
         $csrf = 'route-create-token';
@@ -57,7 +57,7 @@ class AdminRouteCrudTest extends TestCase
     {
         $this->seed(BasicGeographySeeder::class);
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $jfk = Airport::query()->where('iata', 'JFK')->firstOrFail();
         $cun = Airport::query()->where('iata', 'CUN')->firstOrFail();
         $yyz = Airport::query()->where('iata', 'YYZ')->firstOrFail();
@@ -109,7 +109,7 @@ class AdminRouteCrudTest extends TestCase
     {
         $this->seed(BasicGeographySeeder::class);
 
-        $user = User::factory()->create();
+        $user = User::factory()->admin()->create();
         $originAirport = Airport::query()->where('iata', 'JFK')->firstOrFail();
         $destinationAirport = Airport::query()->where('iata', 'CUN')->firstOrFail();
         $route = \App\Models\Route::query()->create([

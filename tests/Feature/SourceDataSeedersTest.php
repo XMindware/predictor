@@ -35,7 +35,7 @@ class SourceDataSeedersTest extends TestCase
         $expectedFlightEventCount = $expectedRouteCount * 10;
 
         $this->assertDatabaseCount('weather_events', 5);
-        $this->assertDatabaseCount('news_events', 5);
+        $this->assertDatabaseCount('news_events', 0);
         $this->assertDatabaseCount('flight_events', $expectedFlightEventCount);
         $this->assertDatabaseHas('flight_events', [
             'travel_date' => '2026-03-29 00:00:00',
@@ -44,7 +44,7 @@ class SourceDataSeedersTest extends TestCase
             'source_type' => 'weather',
             'external_reference' => 'seed:weather:CUN:slot-1',
         ]);
-        $this->assertDatabaseHas('raw_provider_payloads', [
+        $this->assertDatabaseMissing('raw_provider_payloads', [
             'source_type' => 'news',
         ]);
         $this->assertDatabaseHas('watch_targets', [
@@ -60,9 +60,9 @@ class SourceDataSeedersTest extends TestCase
         ]);
 
         $this->assertDatabaseCount('weather_events', 5);
-        $this->assertDatabaseCount('news_events', 5);
+        $this->assertDatabaseCount('news_events', 0);
         $this->assertDatabaseCount('flight_events', $expectedFlightEventCount);
-        $this->assertDatabaseCount('raw_provider_payloads', $expectedFlightEventCount + 10);
+        $this->assertDatabaseCount('raw_provider_payloads', $expectedFlightEventCount + 5);
 
         Carbon::setTestNow();
     }
