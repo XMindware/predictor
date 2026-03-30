@@ -23,12 +23,19 @@ class NewsPayloadNormalizer
         return DB::transaction(function () use ($payload, $watchTarget, $items): int {
             $payload->newsEvents()->delete();
 
+            // For route watch targets (origin → destination), attribute news to
+            // the DESTINATION city — that is the monitored city whose impact
+            // page the article should appear on.
+            // For city-level watch targets (origin → null), fall back to origin.
+            $cityId    = $watchTarget->destination_city_id    ?? $watchTarget->origin_city_id;
+            $airportId = $watchTarget->destination_airport_id ?? $watchTarget->origin_airport_id;
+
             foreach ($items as $item) {
                 $topics = $item['topics'] ?? [];
 
                 NewsEvent::create([
-                    'city_id' => $watchTarget->origin_city_id,
-                    'airport_id' => $watchTarget->origin_airport_id,
+                    'city_id' => $cityId,
+                    'airport_id' => $airportId,
                     'airline_code' => mb_substr((string) ($item['airline_code'] ?? ''), 0, 10) ?: null,
                     'published_at' => $item['published_at'] ?? $payload->fetched_at,
                     'title' => mb_substr((string) ($item['title'] ?? 'Untitled article'), 0, 1000),

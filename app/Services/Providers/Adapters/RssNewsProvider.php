@@ -58,26 +58,54 @@ class RssNewsProvider extends ConfiguredHttpProvider implements NewsProviderInte
         $windowDays      = max(1, (int) ($criteria['date_window_days'] ?? 7));
         $cutoff          = Carbon::now()->subDays($windowDays);
 
-        // Load URLs from DB (global + origin + destination feeds)
-        $iatas    = array_filter([$originIata, $destinationIata]);
-        $feedUrls = RssNewsSource::urlsFor($iatas);
+        // Load URLs from DB — split into city-specific vs global so we can
+        // apply tighter relevance rules to global (non-targeted) feeds.
+        $iatas          = array_filter([$originIata, $destinationIata]);
+        $cityFeedUrls   = RssNewsSource::active()->whereIn('iata', $iatas ?: ['__none__'])->pluck('url')->unique()->all();
+        $globalFeedUrls = RssNewsSource::active()->whereNull('iata')->pluck('url')->unique()->all();
 
-        if ($feedUrls === []) {
+        $allFeedUrls = array_values(array_unique(array_merge($cityFeedUrls, $globalFeedUrls)));
+
+        if ($allFeedUrls === []) {
             Log::info('[RssNewsProvider] No active RSS sources found for IATAs: ' . implode(', ', $iatas ?: ['(none)']));
 
             return [];
         }
 
+        // Build location terms: city names + IATAs the article MUST reference
+        // when it comes from a global (non-targeted) feed.
+        $cityTerms = array_values(array_unique(array_filter(array_map(
+            'strtolower',
+            array_filter([
+                $criteria['focus_city'] ?? '',
+                $criteria['focus_iata'] ?? '',
+                $criteria['destination_city'] ?? '',
+                $criteria['destination_iata'] ?? '',
+                $criteria['origin_city'] ?? '',
+                $criteria['origin_iata'] ?? '',
+            ])
+        ))));
+
         $keywords   = $this->resolveKeywords();
         $maxPerFeed = $this->integerConfig('max_articles_per_feed', 20);
         $minHits    = $this->integerConfig('min_relevance_hits', 1);
 
-        $items = [];
+        $cityFeedSet = array_flip($cityFeedUrls);
+        $items       = [];
 
-        foreach ($feedUrls as $feedUrl) {
+        foreach ($allFeedUrls as $feedUrl) {
             try {
-                $feedItems = $this->fetchFeed($feedUrl, $maxPerFeed, $cutoff, $keywords, $minHits, $criteria);
-                $items     = array_merge($items, $feedItems);
+                // Global feeds must mention the city/IATA — without this check
+                // generic travel articles (and academic papers that incidentally
+                // contain an IATA-like string) pass the relevance filter.
+                $requireCityMatch = ! isset($cityFeedSet[$feedUrl]);
+
+                $feedItems = $this->fetchFeed(
+                    $feedUrl, $maxPerFeed, $cutoff,
+                    $keywords, $minHits,
+                    $criteria, $cityTerms, $requireCityMatch,
+                );
+                $items = array_merge($items, $feedItems);
             } catch (\Throwable $e) {
                 Log::warning('[RssNewsProvider] Feed fetch failed', [
                     'url'   => $feedUrl,
@@ -93,6 +121,7 @@ class RssNewsProvider extends ConfiguredHttpProvider implements NewsProviderInte
 
     /**
      * @param  list<string>          $keywords
+     * @param  list<string>          $cityTerms          City/IATA terms that must appear when $requireCityMatch is true
      * @param  array<string, mixed>  $criteria
      * @return list<NewsData>
      */
@@ -103,6 +132,8 @@ class RssNewsProvider extends ConfiguredHttpProvider implements NewsProviderInte
         array $keywords,
         int $minHits,
         array $criteria,
+        array $cityTerms = [],
+        bool $requireCityMatch = false,
     ): array {
         $response = $this->client([
             'Accept'     => 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
@@ -144,7 +175,7 @@ class RssNewsProvider extends ConfiguredHttpProvider implements NewsProviderInte
                 continue;
             }
 
-            if (! $this->isRelevant($item, $keywords, $minHits)) {
+            if (! $this->isRelevant($item, $keywords, $minHits, $cityTerms, $requireCityMatch)) {
                 continue;
             }
 
@@ -256,15 +287,49 @@ class RssNewsProvider extends ConfiguredHttpProvider implements NewsProviderInte
 
     // ── Relevance filtering ───────────────────────────────────────────────────
 
-    /** @param list<string> $keywords */
-    private function isRelevant(NewsData $item, array $keywords, int $minHits): bool
-    {
+    /**
+     * @param  list<string>  $keywords    Travel-domain keywords (at least $minHits must match)
+     * @param  list<string>  $cityTerms   City name / IATA terms
+     * @param  bool          $requireCityMatch  When true (global feeds), at least one $cityTerm
+     *                                          must appear in the article text. This prevents
+     *                                          generic travel articles — or academic papers that
+     *                                          incidentally contain an IATA-like string — from
+     *                                          polluting the results.
+     */
+    private function isRelevant(
+        NewsData $item,
+        array $keywords,
+        int $minHits,
+        array $cityTerms = [],
+        bool $requireCityMatch = false,
+    ): bool {
+        $haystack = strtolower($item->title . ' ' . $item->summary);
+
+        // ── City-match gate (global feeds only) ───────────────────────────────
+        // The article must mention at least one city name or IATA code.
+        // Without this, "SJD" (San José del Cabo) would match biochemistry
+        // papers and any article that uses the 3-letter string coincidentally.
+        if ($requireCityMatch && $cityTerms !== []) {
+            $cityHit = false;
+
+            foreach ($cityTerms as $term) {
+                if ($term !== '' && str_contains($haystack, $term)) {
+                    $cityHit = true;
+                    break;
+                }
+            }
+
+            if (! $cityHit) {
+                return false;
+            }
+        }
+
+        // ── Travel-keyword gate ───────────────────────────────────────────────
         if ($minHits <= 0) {
             return true;
         }
 
-        $haystack = strtolower($item->title . ' ' . $item->summary);
-        $hits     = 0;
+        $hits = 0;
 
         foreach ($keywords as $keyword) {
             if (str_contains($haystack, $keyword)) {

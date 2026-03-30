@@ -105,22 +105,38 @@ class FetchNewsDataJob extends AbstractFetchProviderDataJob
     {
         $originIata      = $watchTarget->originAirport?->iata ?? '';
         $destinationIata = $watchTarget->destinationAirport?->iata ?? '';
+        $destCityName    = $watchTarget->destinationCity?->name ?? '';
+        $origCityName    = $watchTarget->originCity?->name ?? '';
 
-        $headlineContext = implode(' to ', array_filter([
-            $originIata ?: ($watchTarget->originCity->name ?? ''),
-            $destinationIata ?: ($watchTarget->destinationCity?->name ?? ''),
-        ]));
+        // Primary focus is always the DESTINATION city (the monitored market).
+        // Fall back to origin city for city-level watch targets (destination=null).
+        $focusCityName = $destCityName ?: $origCityName;
+        $focusIata     = $destinationIata ?: $originIata;
+
+        // Build the NewsAPI search query using the full city name, NOT the IATA code.
+        // IATA codes like "SJD" are 3-letter strings that appear in completely unrelated
+        // content (gene names, DOIs, abbreviations), producing false positives.
+        // Full city names are unambiguous and produce far more relevant results.
+        if ($focusCityName !== '') {
+            $headlineContext = sprintf('"%s" (airport OR flights OR travel OR airline)', $focusCityName);
+        } else {
+            // Last resort: IATA + aviation context to narrow false positives
+            $headlineContext = sprintf('%s airport flights travel', $focusIata);
+        }
 
         return [
             'provider_slug'    => $provider->slug,
             'watch_target_id'  => $watchTarget->id,
-            // Used by NewsApiProvider for keyword search
-            'headline_context' => $headlineContext !== '' ? $headlineContext : ($watchTarget->originCity->name ?? ''),
-            // Used by RssNewsProvider for city-targeted feed lookup
+            // Used by NewsApiProvider: precise city-name phrase query
+            'headline_context' => $headlineContext,
+            // Focus city/IATA: used by RssNewsProvider for city-term relevance check
+            'focus_city'       => $focusCityName,
+            'focus_iata'       => $focusIata,
+            // Used by RssNewsProvider for feed URL lookup
             'origin_iata'      => $originIata,
             'destination_iata' => $destinationIata,
-            'origin_city'      => $watchTarget->originCity->name ?? '',
-            'destination_city' => $watchTarget->destinationCity?->name ?? '',
+            'origin_city'      => $origCityName,
+            'destination_city' => $destCityName,
             'date_window_days' => $watchTarget->date_window_days,
         ];
     }

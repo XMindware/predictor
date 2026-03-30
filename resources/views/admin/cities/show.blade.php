@@ -211,6 +211,34 @@
             border: none; border-top: 1px solid var(--line); margin: 0;
         }
 
+        /* ── monitoring criteria strip ──────────────────────────────────── */
+        .criteria-strip {
+            display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+            padding: 12px 16px; background: #f8faff;
+            border: 1px solid #e0e7ff; border-radius: 12px; margin-bottom: 16px;
+            font-size: .78rem;
+        }
+        .criteria-block { display: flex; flex-direction: column; gap: 2px; }
+        .criteria-label {
+            font-size: .65rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .07em; color: #94a3b8;
+        }
+        .criteria-value {
+            font-family: ui-monospace, 'Cascadia Code', monospace;
+            font-size: .78rem; color: #1e293b; font-weight: 500;
+            background: #fff; border: 1px solid #e0e7ff; border-radius: 7px;
+            padding: 4px 10px; word-break: break-all;
+        }
+        .criteria-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 9px; border-radius: 999px;
+            font-size: .72rem; font-weight: 700;
+            background: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe;
+            white-space: nowrap;
+        }
+        .criteria-pill.rss { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+        .criteria-sep { align-self: center; color: #cbd5e1; font-size: 1.1rem; }
+
         /* ── empty state ─────────────────────────────────────────────────── */
         .empty-state {
             text-align: center; padding: 48px 24px;
@@ -404,6 +432,32 @@
             </div>
             <div style="font-size:.78rem;color:var(--muted);">
                 Ranked by relevance × severity · last {{ $days }} day{{ $days !== 1 ? 's' : '' }}
+            </div>
+        </div>
+
+        {{-- Monitoring criteria strip --}}
+        @php $mc = $report['monitoring_criteria']; @endphp
+        <div class="criteria-strip">
+            <div class="criteria-block" style="flex:1;min-width:200px;">
+                <span class="criteria-label">NewsAPI query</span>
+                <span class="criteria-value">{{ $mc['newsapi_query'] }}</span>
+            </div>
+            <div class="criteria-sep">·</div>
+            <div class="criteria-block">
+                <span class="criteria-label">Location terms (RSS filter)</span>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:2px;">
+                    @foreach ($mc['city_terms'] as $term)
+                        <span class="criteria-pill">{{ $term }}</span>
+                    @endforeach
+                </div>
+            </div>
+            <div class="criteria-sep">·</div>
+            <div class="criteria-block">
+                <span class="criteria-label">RSS feeds</span>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:2px;">
+                    <span class="criteria-pill rss">{{ $mc['rss_city_feeds'] }} city-specific</span>
+                    <span class="criteria-pill rss">{{ $mc['rss_global_feeds'] }} global</span>
+                </div>
             </div>
         </div>
 

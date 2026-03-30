@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Airport;
 use App\Models\City;
 use App\Models\NewsEvent;
+use App\Models\RssNewsSource;
 use App\Models\WatchTarget;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -47,6 +48,7 @@ class CityNewsImpactService
      *   watch_targets: Collection,
      *   active_watch_targets: int,
      *   last_event_at: Carbon|null,
+     *   monitoring_criteria: array{newsapi_query: string, rss_city_feeds: int, rss_global_feeds: int, city_terms: list<string>},
      * }
      */
     public function reportForAirport(Airport $airport, int $days = 7): array
@@ -97,6 +99,7 @@ class CityNewsImpactService
             'watch_targets'        => $watchTargets,
             'active_watch_targets' => $watchTargets->where('enabled', true)->count(),
             'last_event_at'        => $events->first()?->published_at,
+            'monitoring_criteria'  => $this->monitoringCriteria($airport),
         ];
     }
 
@@ -146,6 +149,40 @@ class CityNewsImpactService
             ->get();
 
         return $airports->map(fn (Airport $a) => $this->reportForAirport($a, $days));
+    }
+
+    // ─── Monitoring criteria ──────────────────────────────────────────────────
+
+    /**
+     * Reconstruct the search parameters used by the ingestion pipeline for this
+     * airport, so the admin can see exactly what is being searched and why
+     * particular articles are (or aren't) included.
+     *
+     * @return array{newsapi_query: string, rss_city_feeds: int, rss_global_feeds: int, city_terms: list<string>}
+     */
+    private function monitoringCriteria(Airport $airport): array
+    {
+        $cityName = $airport->city?->name ?? '';
+        $iata     = $airport->iata;
+
+        // NewsAPI query — mirrors FetchNewsDataJob::buildCriteria()
+        $newsApiQuery = $cityName !== ''
+            ? sprintf('"%s" (airport OR flights OR travel OR airline)', $cityName)
+            : sprintf('%s airport flights travel', $iata);
+
+        // RSS feed counts
+        $rssCityFeeds   = RssNewsSource::active()->where('iata', $iata)->count();
+        $rssGlobalFeeds = RssNewsSource::active()->whereNull('iata')->count();
+
+        // Location terms the relevance filter enforces on global RSS feeds
+        $cityTerms = array_values(array_unique(array_filter([$cityName, $iata])));
+
+        return [
+            'newsapi_query'   => $newsApiQuery,
+            'rss_city_feeds'  => $rssCityFeeds,
+            'rss_global_feeds'=> $rssGlobalFeeds,
+            'city_terms'      => $cityTerms,
+        ];
     }
 
     // ─── Aggregation helpers ──────────────────────────────────────────────────
