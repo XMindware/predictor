@@ -27,7 +27,7 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamps();
 
-            $table->index(['iata', 'is_active']);
+            $table->index(['iata', 'is_active'], 'rss_sources_iata_active_idx');
             $table->unique(['provider_id', 'url'], 'rss_sources_provider_url_unique');
         });
     }

@@ -23,8 +23,8 @@ return new class extends Migration
             $table->json('supporting_factors')->nullable();
             $table->timestamps();
 
-            $table->unique(['airport_id', 'as_of', 'window_hours']);
-            $table->index(['airport_id', 'as_of']);
+            $table->unique(['airport_id', 'as_of', 'window_hours'], 'airport_indicators_airport_asof_win_uq');
+            $table->index(['airport_id', 'as_of'], 'airport_indicators_airport_asof_idx');
         });
     }
 

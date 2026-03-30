@@ -24,7 +24,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['route_id', 'as_of', 'travel_date', 'window_hours'], 'route_indicators_unique_window');
-            $table->index(['route_id', 'as_of']);
+            $table->index(['route_id', 'as_of'], 'route_indicators_route_asof_idx');
         });
     }
 

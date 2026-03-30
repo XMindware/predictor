@@ -25,7 +25,7 @@ return new class extends Migration
             $table->jsonb('factors')->nullable();
             $table->dateTime('generated_at');
 
-            $table->index(['route_id', 'travel_date', 'generated_at']);
+            $table->index(['route_id', 'travel_date', 'generated_at'], 'risk_snapshots_route_travel_gen_idx');
             $table->index(['origin_airport_id', 'destination_airport_id', 'travel_date'], 'risk_snapshots_airport_query_idx');
             $table->index(['origin_city_id', 'destination_city_id', 'travel_date'], 'risk_snapshots_city_query_idx');
         });

@@ -27,9 +27,9 @@ return new class extends Migration
             $table->foreignId('raw_payload_id')->constrained('raw_provider_payloads')->cascadeOnDelete();
             $table->timestamps();
 
-            $table->index(['city_id', 'airport_id', 'published_at']);
-            $table->index(['source_provider_id', 'published_at']);
-            $table->index('category');
+            $table->index(['city_id', 'airport_id', 'published_at'], 'news_events_city_airport_pub_idx');
+            $table->index(['source_provider_id', 'published_at'], 'news_events_provider_pub_idx');
+            $table->index('category', 'news_events_category_idx');
         });
     }
 

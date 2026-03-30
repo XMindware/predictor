@@ -20,8 +20,8 @@ return new class extends Migration
             $table->boolean('active')->default(false);
             $table->timestamps();
 
-            $table->unique(['name', 'version']);
-            $table->index('active');
+            $table->unique(['name', 'version'], 'scoring_profiles_name_version_uq');
+            $table->index('active', 'scoring_profiles_active_idx');
         });
     }
 

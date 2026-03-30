@@ -22,8 +22,8 @@ return new class extends Migration
             $table->json('supporting_factors')->nullable();
             $table->timestamps();
 
-            $table->unique(['city_id', 'as_of', 'window_hours']);
-            $table->index(['city_id', 'as_of']);
+            $table->unique(['city_id', 'as_of', 'window_hours'], 'city_indicators_city_asof_win_uq');
+            $table->index(['city_id', 'as_of'], 'city_indicators_city_asof_idx');
         });
     }
 
