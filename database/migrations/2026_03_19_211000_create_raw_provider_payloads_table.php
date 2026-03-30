@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('source_type');
             $table->string('external_reference')->nullable();
             $table->jsonb('payload');
-            $table->timestamp('fetched_at');
+            $table->dateTime('fetched_at');
             $table->foreignId('ingestion_run_id')->constrained('ingestion_runs')->cascadeOnDelete();
             $table->timestamps();
 

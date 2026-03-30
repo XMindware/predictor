@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('city_indicators', function (Blueprint $table) {
             $table->id();
             $table->foreignId('city_id')->constrained()->cascadeOnDelete();
-            $table->timestamp('as_of');
+            $table->dateTime('as_of');
             $table->unsignedInteger('window_hours');
             $table->decimal('weather_score', 5, 2);
             $table->decimal('news_score', 5, 2);

@@ -16,8 +16,8 @@ return new class extends Migration
             $table->foreignId('provider_id')->constrained()->cascadeOnDelete();
             $table->string('source_type');
             $table->string('status');
-            $table->timestamp('started_at')->nullable();
-            $table->timestamp('finished_at')->nullable();
+            $table->dateTime('started_at')->nullable();
+            $table->dateTime('finished_at')->nullable();
             $table->jsonb('request_meta')->nullable();
             $table->jsonb('response_meta')->nullable();
             $table->text('error_message')->nullable();

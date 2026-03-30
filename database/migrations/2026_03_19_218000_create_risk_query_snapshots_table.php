@@ -23,7 +23,7 @@ return new class extends Migration
             $table->string('risk_level');
             $table->string('confidence_level');
             $table->jsonb('factors')->nullable();
-            $table->timestamp('generated_at');
+            $table->dateTime('generated_at');
 
             $table->index(['route_id', 'travel_date', 'generated_at']);
             $table->index(['origin_airport_id', 'destination_airport_id', 'travel_date'], 'risk_snapshots_airport_query_idx');

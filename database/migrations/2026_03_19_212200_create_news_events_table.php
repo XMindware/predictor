@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('city_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('airport_id')->nullable()->constrained()->nullOnDelete();
             $table->string('airline_code')->nullable();
-            $table->timestamp('published_at');
+            $table->dateTime('published_at');
             $table->string('title');
             $table->text('summary');
             $table->text('url');

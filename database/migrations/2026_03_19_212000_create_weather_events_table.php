@@ -15,8 +15,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('city_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('airport_id')->nullable()->constrained()->nullOnDelete();
-            $table->timestamp('event_time');
-            $table->timestamp('forecast_for');
+            $table->dateTime('event_time');
+            $table->dateTime('forecast_for');
             $table->decimal('severity_score', 5, 2);
             $table->string('condition_code');
             $table->text('summary');

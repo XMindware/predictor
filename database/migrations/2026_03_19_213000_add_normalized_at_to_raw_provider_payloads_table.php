@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('raw_provider_payloads', function (Blueprint $table) {
-            $table->timestamp('normalized_at')->nullable()->after('fetched_at');
+            $table->dateTime('normalized_at')->nullable()->after('fetched_at');
         });
     }
 

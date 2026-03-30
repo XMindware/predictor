@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('airport_indicators', function (Blueprint $table) {
             $table->id();
             $table->foreignId('airport_id')->constrained()->cascadeOnDelete();
-            $table->timestamp('as_of');
+            $table->dateTime('as_of');
             $table->unsignedInteger('window_hours');
             $table->decimal('weather_score', 5, 2);
             $table->decimal('flight_score', 5, 2);

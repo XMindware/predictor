@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('route_indicators', function (Blueprint $table) {
             $table->id();
             $table->foreignId('route_id')->constrained()->cascadeOnDelete();
-            $table->timestamp('as_of');
+            $table->dateTime('as_of');
             $table->date('travel_date')->nullable();
             $table->unsignedInteger('window_hours');
             $table->decimal('flight_score', 5, 2);

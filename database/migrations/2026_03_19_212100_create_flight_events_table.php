@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('origin_airport_id')->constrained('airports')->cascadeOnDelete();
             $table->foreignId('destination_airport_id')->nullable()->constrained('airports')->nullOnDelete();
             $table->string('airline_code')->nullable();
-            $table->timestamp('event_time');
+            $table->dateTime('event_time');
             $table->date('travel_date')->nullable();
             $table->decimal('cancellation_rate', 5, 2)->nullable();
             $table->decimal('delay_average_minutes', 8, 2)->nullable();
