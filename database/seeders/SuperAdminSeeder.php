@@ -15,9 +15,10 @@ class SuperAdminSeeder extends Seeder
         User::query()->updateOrCreate(
             ['email' => env('SUPERADMIN_EMAIL', 'superadmin@predictor.local')],
             [
-                'name' => env('SUPERADMIN_NAME', 'Super Admin'),
-                'password' => env('SUPERADMIN_PASSWORD', 'password'),
-                'email_verified_at' => now(),
+                'name'               => env('SUPERADMIN_NAME', 'Super Admin'),
+                'password'           => env('SUPERADMIN_PASSWORD', 'password'),
+                'role'               => \App\Models\User::ROLE_SUPER_ADMIN,
+                'email_verified_at'  => now(),
             ],
         );
     }

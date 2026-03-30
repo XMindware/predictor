@@ -104,6 +104,13 @@
         </label>
 
         <button type="submit">Sign in</button>
+
+        <p style="margin: 20px 0 0; text-align: center; color: #5b667a; font-size: 14px;">
+            Don't have an account?
+            <a href="{{ route('register') }}" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">
+                Create a free visitor account
+            </a>
+        </p>
     </form>
 </main>
 </body>

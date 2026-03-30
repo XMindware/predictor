@@ -6,6 +6,7 @@ use App\Models\IngestionRun;
 use App\Models\Provider;
 use App\Models\RawProviderPayload;
 use App\Models\WatchTarget;
+use App\Services\Providers\Adapters\ConfiguredHttpProvider;
 use App\Services\Providers\ProviderAdapterRegistry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -15,6 +16,11 @@ use Throwable;
 abstract class AbstractFetchProviderDataJob implements ShouldQueue
 {
     use Queueable;
+
+    /**
+     * @var list<array<string, mixed>>
+     */
+    protected array $lastExchangeLog = [];
 
     public function handle(ProviderAdapterRegistry $registry): void
     {
@@ -83,8 +89,9 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
             foreach ($watchTargets as $watchTarget) {
                 $criteria = $this->buildCriteria($provider, $watchTarget);
                 $items = $this->fetchItems($registry, $provider, $criteria);
+                $httpExchanges = $this->pullExchangeLog();
 
-                if ($items === []) {
+                if ($items === [] && $httpExchanges === []) {
                     continue;
                 }
 
@@ -94,6 +101,7 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
                     'payload' => [
                         'watch_target_id' => $watchTarget->id,
                         'criteria' => $criteria,
+                        'http_exchanges' => $httpExchanges,
                         'items' => $this->normalizeItems($items),
                     ],
                     'fetched_at' => now(),
@@ -102,7 +110,9 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
 
                 $payloadCount++;
 
-                $this->dispatchNormalization($payload);
+                if ($items !== []) {
+                    $this->dispatchNormalization($payload);
+                }
             }
 
             $ingestionRun->update([
@@ -160,10 +170,35 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
     {
         $first = $items[0] ?? null;
 
+        if ($first === null) {
+            return null;
+        }
+
         if (is_array($first)) {
             return $first['external_reference'] ?? null;
         }
 
         return property_exists($first, 'externalReference') ? $first->externalReference : null;
+    }
+
+    /**
+     * @param  ConfiguredHttpProvider|mixed  $adapter
+     */
+    protected function captureExchangeLog(mixed $adapter): void
+    {
+        $this->lastExchangeLog = $adapter instanceof ConfiguredHttpProvider
+            ? $adapter->pullExchangeLog()
+            : [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function pullExchangeLog(): array
+    {
+        $log = $this->lastExchangeLog;
+        $this->lastExchangeLog = [];
+
+        return $log;
     }
 }

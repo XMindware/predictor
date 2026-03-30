@@ -15,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->redirectGuestsTo(fn () => route('login'));
         $middleware->redirectUsersTo(fn () => route('dashboard'));
+
+        $middleware->alias([
+            'role'     => \App\Http\Middleware\CheckRole::class,
+            'min_role' => \App\Http\Middleware\RequireMinRole::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

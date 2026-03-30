@@ -27,7 +27,11 @@ class FetchWeatherDataJob extends AbstractFetchProviderDataJob
 
     protected function fetchItems(ProviderAdapterRegistry $registry, Provider $provider, array $criteria): array
     {
-        return $registry->weather($provider)->fetchWeather($criteria);
+        $adapter = $registry->weather($provider);
+        $items = $adapter->fetchWeather($criteria);
+        $this->captureExchangeLog($adapter);
+
+        return $items;
     }
 
     protected function dispatchNormalization(RawProviderPayload $payload): void

@@ -29,9 +29,9 @@ class NewsPayloadNormalizer
                 NewsEvent::create([
                     'city_id' => $watchTarget->origin_city_id,
                     'airport_id' => $watchTarget->origin_airport_id,
-                    'airline_code' => $item['airline_code'] ?? null,
+                    'airline_code' => mb_substr((string) ($item['airline_code'] ?? ''), 0, 10) ?: null,
                     'published_at' => $item['published_at'] ?? $payload->fetched_at,
-                    'title' => (string) ($item['title'] ?? 'Untitled article'),
+                    'title' => mb_substr((string) ($item['title'] ?? 'Untitled article'), 0, 1000),
                     'summary' => (string) ($item['summary'] ?? ''),
                     'url' => (string) ($item['url'] ?? ''),
                     'category' => $topics[0] ?? 'general',

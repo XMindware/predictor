@@ -173,6 +173,17 @@
         .result li {
             color: inherit;
         }
+        .result .panel {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+        .result .panel h3,
+        .result .panel p,
+        .result .panel li,
+        .result .panel strong,
+        .result .panel span {
+            color: #f8fafc;
+        }
         .score-summary {
             display: grid;
             gap: 16px;
@@ -316,6 +327,29 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        details {
+            border: 1px solid #dbe2ef;
+            border-radius: 12px;
+            background: #f8fbff;
+            padding: 10px 12px;
+        }
+        details + details {
+            margin-top: 10px;
+        }
+        summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: #172033;
+        }
+        .code-block {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 10px;
+            background: #0f172a;
+            color: #e2e8f0;
+            overflow-x: auto;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -325,7 +359,10 @@
         $riskEvaluationResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 'recompute risk'
             ? $manualToolResult['details']
             : null;
-        $queryCityScoreResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 'query city score'
+        $flightFetchResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 're-fetch flights'
+            ? $manualToolResult['details']
+            : null;
+        $cityRiskResult = $manualToolResult && ($manualToolResult['tool'] ?? null) === 'query city risk'
             ? $manualToolResult['details']
             : null;
     @endphp
@@ -466,212 +503,261 @@
                             </ul>
                         </div>
                     </div>
-                @elseif ($queryCityScoreResult)
+                @elseif ($flightFetchResult)
                     @php
-                        $scoreScope = $queryCityScoreResult['score_scope'] ?? 'city';
+                        $fetchedFlights = collect($flightFetchResult['fetched_flights'] ?? []);
                     @endphp
                     <div class="score-summary">
-                        @if (($queryCityScoreResult['mode'] ?? null) === 'single')
-                            <div>
-                                <strong>City Score Summary</strong>
-                                <p>
-                                    {{ $queryCityScoreResult['city'] }}{{ !empty($queryCityScoreResult['country']) ? ', '.$queryCityScoreResult['country'] : '' }}
-                                    for {{ $queryCityScoreResult['requested_date'] }}.
-                                    Snapshot used: {{ \Illuminate\Support\Carbon::parse($queryCityScoreResult['snapshot_as_of'])->toDayDateTimeString() }}.
-                                </p>
-                                @if ($scoreScope === 'route')
-                                    <p class="score-note">
-                                        This city score is route-backed. It uses the monitored route
-                                        {{ $queryCityScoreResult['route_label'] ?? ($queryCityScoreResult['city'].' → '.($queryCityScoreResult['base_airport_iata'] ?? 'n/a')) }}
-                                        and follows the same route indicator logic: flight + news.
-                                    </p>
-                                @else
-                                    <p class="score-note">
-                                        This score combines city weather, city news, and flight disruption on active routes into the base airport
-                                        {{ $queryCityScoreResult['base_airport_iata'] ?? 'n/a' }}.
-                                    </p>
-                                @endif
-                                <p class="score-note">
-                                    Score scale: 0 to 3 means low disruption risk, above 3 to 6 means moderate risk, above 6 to 8 means high risk,
-                                    and above 8 means severe risk. Higher scores mean worse expected travel conditions.
-                                </p>
-                            </div>
+                        <div>
+                            <strong>Flight Fetch Result</strong>
+                            <p>
+                                {{ $flightFetchResult['route'] ?? 'n/a' }} fetched from {{ $flightFetchResult['providers'] ?? 0 }} provider(s).
+                            </p>
+                            <p class="score-note">
+                                Payloads created: {{ $flightFetchResult['payloads'] ?? 0 }} ·
+                                flight records created: {{ $flightFetchResult['normalized_events'] ?? 0 }}
+                            </p>
+                        </div>
 
-                            <div class="score-metrics">
-                                <div class="score-metric">
-                                    <span>Combined</span>
-                                    <strong>{{ number_format((float) $queryCityScoreResult['combined_score'], 2) }}</strong>
-                                </div>
-                                @if ($scoreScope !== 'route')
-                                    <div class="score-metric">
-                                        <span>Weather</span>
-                                        <strong>{{ number_format((float) $queryCityScoreResult['weather_score'], 2) }}</strong>
-                                        <span>{{ $queryCityScoreResult['weather_events'] }} events</span>
-                                    </div>
-                                @endif
-                                <div class="score-metric">
-                                    <span>News</span>
-                                    <strong>{{ number_format((float) $queryCityScoreResult['news_score'], 2) }}</strong>
-                                    <span>{{ $queryCityScoreResult['news_events'] }} events</span>
-                                </div>
-                                <div class="score-metric">
-                                    <span>Flights to {{ $queryCityScoreResult['base_airport_iata'] ?? 'Base' }}</span>
-                                    <strong>{{ number_format((float) ($queryCityScoreResult['flight_score'] ?? 0), 2) }}</strong>
-                                    <span>{{ $queryCityScoreResult['flight_events'] ?? 0 }} events</span>
-                                </div>
-                                <div class="score-metric">
-                                    <span>Window</span>
-                                    <strong>{{ $queryCityScoreResult['window_hours'] }}h</strong>
-                                </div>
+                        <div class="detail-grid">
+                            <div class="detail-card">
+                                <span>Route</span>
+                                <strong>{{ $flightFetchResult['route'] ?? 'n/a' }}</strong>
+                                <small>Manual re-fetch completed.</small>
                             </div>
-                        @else
-                            @php
-                                $points = collect($queryCityScoreResult['points'] ?? []);
-                                $hasWeather = $points->contains(fn (array $point): bool => array_key_exists('weather_score', $point) && $point['weather_score'] !== null);
-                                $chartLeft = 56;
-                                $chartRight = 760;
-                                $chartTop = 28;
-                                $chartBottom = 220;
-                                $chartHeight = $chartBottom - $chartTop;
-                                $chartWidth = $chartRight - $chartLeft;
-                                $toY = static fn ($score): float => round(
-                                    $chartBottom - ((max(0, min(10, (float) ($score ?? 0))) / 10) * $chartHeight),
-                                    2
-                                );
-                                $chartPoints = $points->values()->map(function (array $point, int $index) use ($chartBottom, $chartLeft, $chartWidth, $points, $toY) {
-                                    $x = $points->count() > 1 ? $chartLeft + ($index * ($chartWidth / max(1, $points->count() - 1))) : $chartLeft + ($chartWidth / 2);
-                                    $combinedY = $toY((float) $point['combined_score']);
-                                    $weatherY = array_key_exists('weather_score', $point) && $point['weather_score'] !== null
-                                        ? $toY((float) $point['weather_score'])
-                                        : null;
-                                    $newsY = $toY((float) $point['news_score']);
-                                    $flightY = $toY((float) ($point['flight_score'] ?? 0));
-
-                                    return [
-                                        'x' => round($x, 2),
-                                        'combined_y' => $combinedY,
-                                        'weather_y' => $weatherY,
-                                        'news_y' => $newsY,
-                                        'flight_y' => $flightY,
-                                    ] + $point;
-                                });
-                                $combinedPolyline = $chartPoints->map(
-                                    fn (array $point): string => $point['x'].','.$point['combined_y']
-                                )->implode(' ');
-                                $weatherPolyline = $hasWeather
-                                    ? $chartPoints
-                                        ->filter(fn (array $point): bool => $point['weather_y'] !== null)
-                                        ->map(fn (array $point): string => $point['x'].','.$point['weather_y'])
-                                        ->implode(' ')
-                                    : '';
-                                $newsPolyline = $chartPoints->map(
-                                    fn (array $point): string => $point['x'].','.$point['news_y']
-                                )->implode(' ');
-                                $flightPolyline = $chartPoints->map(
-                                    fn (array $point): string => $point['x'].','.$point['flight_y']
-                                )->implode(' ');
-                                $yTicks = collect([0, 3, 6, 8, 10])->map(fn (int $value): array => [
-                                    'value' => $value,
-                                    'y' => $toY((float) $value),
-                                ]);
-                                $xTicks = $chartPoints
-                                    ->filter(fn (array $point, int $index): bool => $index === 0
-                                        || $index === $chartPoints->count() - 1
-                                        || $index % 7 === 0)
-                                    ->values();
-                            @endphp
-                            <div>
-                                <strong>City Score Trend</strong>
-                                <p>
-                                    {{ $queryCityScoreResult['city'] }}{{ !empty($queryCityScoreResult['country']) ? ', '.$queryCityScoreResult['country'] : '' }}
-                                    projected for the next {{ $queryCityScoreResult['projection_days'] ?? 30 }} days,
-                                    from {{ $queryCityScoreResult['from_date'] }} to {{ $queryCityScoreResult['to_date'] }}.
-                                </p>
-                                @if (!empty($queryCityScoreResult['baseline_snapshot_as_of']))
-                                    <p>
-                                        Baseline city/news signal uses the latest snapshot from
-                                        {{ \Illuminate\Support\Carbon::parse($queryCityScoreResult['baseline_snapshot_as_of'])->toDayDateTimeString() }}.
-                                    </p>
-                                @endif
-                                <p class="score-note">
-                                    @if ($scoreScope === 'route')
-                                        This graph is route-backed and follows
-                                        {{ $queryCityScoreResult['route_label'] ?? ($queryCityScoreResult['city'].' → '.($queryCityScoreResult['base_airport_iata'] ?? 'the base airport')) }}:
-                                        flight + news.
-                                    @else
-                                        This graph combines city weather, city news, and flight disruption for active routes from this city into
-                                        {{ $queryCityScoreResult['base_airport_iata'] ?? 'the base airport' }}.
-                                    @endif
-                                </p>
-                                <p class="score-note">
-                                    Score scale: 0 to 3 means low disruption risk, above 3 to 6 means moderate risk, above 6 to 8 means high risk,
-                                    and above 8 means severe risk. Higher scores mean worse expected travel conditions.
-                                </p>
+                            <div class="detail-card">
+                                <span>Providers</span>
+                                <strong>{{ $flightFetchResult['providers'] ?? 0 }}</strong>
+                                <small>Active provider(s) queried.</small>
                             </div>
+                            <div class="detail-card">
+                                <span>Payloads</span>
+                                <strong>{{ $flightFetchResult['payloads'] ?? 0 }}</strong>
+                                <small>Raw provider payload(s) stored.</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Flight Records</span>
+                                <strong>{{ $flightFetchResult['normalized_events'] ?? 0 }}</strong>
+                                <small>Normalized flight event row(s) created.</small>
+                            </div>
+                        </div>
 
-                            <div class="score-chart">
-                                <div class="score-chart-header">
-                                    <div>
-                                        <strong>Projected Daily Scores (0-10)</strong>
-                                        <span>Combined score and component trends for the next {{ $queryCityScoreResult['projection_days'] ?? 30 }} days.</span>
-                                    </div>
-                                    <ul class="score-legend" aria-label="Chart legend">
-                                        <li><span class="score-legend-swatch" style="background:#93c5fd;"></span>Combined</li>
-                                        @if ($hasWeather)
-                                            <li><span class="score-legend-swatch" style="background:#34d399;"></span>Weather</li>
+                        <div class="panel">
+                            <h3>Fetched Flights</h3>
+                            @if ($fetchedFlights->isEmpty())
+                                <p class="empty">No flights were returned for this route during the manual fetch.</p>
+                            @else
+                                <div class="scroll">
+                                    <table>
+                                        <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Airline</th>
+                                            <th>Delay</th>
+                                            <th>Cancelled</th>
+                                            <th>Score</th>
+                                            <th>Provider</th>
+                                            <th>Summary</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        @foreach ($fetchedFlights as $flight)
+                                            <tr>
+                                                <td>{{ $flight['travel_date'] ?? 'n/a' }}</td>
+                                                <td>{{ $flight['airline_code'] ?? 'n/a' }}</td>
+                                                <td>{{ number_format((float) ($flight['delay_average_minutes'] ?? 0), 1) }} min</td>
+                                                <td>{{ ((float) ($flight['cancellation_rate'] ?? 0)) > 0 ? 'Yes' : 'No' }}</td>
+                                                <td>{{ number_format((float) ($flight['disruption_score'] ?? 0), 2) }}</td>
+                                                <td>{{ $flight['provider'] ?? 'n/a' }}</td>
+                                                <td>{{ $flight['summary'] ?? 'n/a' }}</td>
+                                            </tr>
+                                        @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                @elseif ($cityRiskResult)
+                    @php
+                        $primaryAssessment = $cityRiskResult['primary_assessment'] ?? [];
+                        $cityDrivers = collect($primaryAssessment['drivers'] ?? [])->take(4);
+                        $cityComponentAges = collect($primaryAssessment['freshness']['component_ages'] ?? []);
+                        $citySources = $cityRiskResult['source_details'] ?? [];
+                    @endphp
+                    <div class="score-summary">
+                        <div>
+                            <strong>City Risk Summary</strong>
+                            <p>
+                                {{ $cityRiskResult['city'] }}{{ !empty($cityRiskResult['country']) ? ', '.$cityRiskResult['country'] : '' }}
+                                for the next {{ $cityRiskResult['window_hours'] }} hours,
+                                from {{ \Illuminate\Support\Carbon::parse($cityRiskResult['from_time'])->toDayDateTimeString() }}
+                                to {{ \Illuminate\Support\Carbon::parse($cityRiskResult['to_time'])->toDayDateTimeString() }}.
+                            </p>
+                            <p class="score-note">
+                                This evaluates monitored routes from the selected city into the base airport
+                                {{ $cityRiskResult['base_airport_iata'] ?? 'n/a' }}
+                                and highlights the highest assessed risk in that near-term window.
+                            </p>
+                            <p class="score-note">{{ $cityRiskResult['product_framing'] ?? 'Estimate of short-term travel disruption risk and probable no-show uplift.' }}</p>
+                        </div>
+
+                        <div class="detail-grid">
+                            <div class="detail-card">
+                                <span>Highest Window Risk</span>
+                                <strong>{{ number_format((float) ($primaryAssessment['score'] ?? 0), 2) }}</strong>
+                                <small>{{ strtoupper((string) ($primaryAssessment['risk_level'] ?? 'unknown')) }} on {{ $primaryAssessment['travel_date'] ?? 'n/a' }}</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Lead Route</span>
+                                <strong>{{ $primaryAssessment['route_label'] ?? 'n/a' }}</strong>
+                                <small>{{ $cityRiskResult['routes_evaluated'] ?? 0 }} monitored route(s) evaluated</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Confidence</span>
+                                <strong>{{ strtoupper((string) ($primaryAssessment['confidence']['level'] ?? 'unknown')) }}</strong>
+                                <small>{{ number_format(((float) ($primaryAssessment['confidence']['score'] ?? 0)) * 100, 0) }}% weighted coverage</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Data Freshness</span>
+                                <strong>{{ strtoupper((string) ($primaryAssessment['freshness']['level'] ?? 'unknown')) }}</strong>
+                                <small>Stalest signal: {{ $primaryAssessment['freshness']['minutes_since_stalest_signal'] ?? 'n/a' }} min old</small>
+                            </div>
+                            <div class="detail-card">
+                                <span>Probable No-show Uplift</span>
+                                <strong>{{ number_format((float) ($primaryAssessment['probable_no_show_uplift']['estimate_percent'] ?? 0), 1) }}%</strong>
+                                <small>
+                                    Range {{ number_format((float) ($primaryAssessment['probable_no_show_uplift']['range_percent']['low'] ?? 0), 1) }}%
+                                    to {{ number_format((float) ($primaryAssessment['probable_no_show_uplift']['range_percent']['high'] ?? 0), 1) }}%
+                                </small>
+                            </div>
+                        </div>
+
+                        <p class="risk-meta">
+                            <strong>Recommended Action</strong><br>
+                            {{ $primaryAssessment['recommended_action']['summary'] ?? 'Continue monitoring this market.' }}
+                            @if (!empty($primaryAssessment['recommended_action']['primary_driver']))
+                                Primary driver: {{ str_replace('_', ' ', $primaryAssessment['recommended_action']['primary_driver']) }}.
+                            @endif
+                        </p>
+
+                        <div class="grid dual">
+                            <div class="panel">
+                                <h3>Source Details</h3>
+                                <ul class="result-list">
+                                    <li>
+                                        Weather:
+                                        {{ $citySources['weather']['events_found'] ?? 0 }} event(s)
+                                        @if (!empty($citySources['weather']['top_condition']))
+                                            · top condition {{ $citySources['weather']['top_condition'] }}
                                         @endif
-                                        <li><span class="score-legend-swatch" style="background:#fbbf24;"></span>News</li>
-                                        <li><span class="score-legend-swatch" style="background:#f87171;"></span>Flight</li>
-                                    </ul>
-                                </div>
-                                <svg viewBox="0 0 860 260" role="img" aria-label="City score trend chart with combined, weather, news, and flight lines">
-                                    <text x="56" y="16" font-size="12" fill="#cbd5e1">Risk score</text>
-                                    <text x="408" y="250" text-anchor="middle" font-size="12" fill="#cbd5e1">Projected travel date</text>
-                                    <rect x="{{ $chartLeft }}" y="{{ $toY(10) }}" width="{{ $chartWidth }}" height="{{ $toY(8) - $toY(10) }}" fill="rgba(239,68,68,0.12)" />
-                                    <rect x="{{ $chartLeft }}" y="{{ $toY(8) }}" width="{{ $chartWidth }}" height="{{ $toY(6) - $toY(8) }}" fill="rgba(251,191,36,0.10)" />
-                                    <rect x="{{ $chartLeft }}" y="{{ $toY(6) }}" width="{{ $chartWidth }}" height="{{ $toY(3) - $toY(6) }}" fill="rgba(96,165,250,0.10)" />
-                                    <rect x="{{ $chartLeft }}" y="{{ $toY(3) }}" width="{{ $chartWidth }}" height="{{ $toY(0) - $toY(3) }}" fill="rgba(52,211,153,0.10)" />
-                                    @foreach ($yTicks as $tick)
-                                        <line x1="{{ $chartLeft }}" y1="{{ $tick['y'] }}" x2="{{ $chartRight }}" y2="{{ $tick['y'] }}" stroke="rgba(255,255,255,0.14)" stroke-width="1" />
-                                        <text x="44" y="{{ $tick['y'] + 4 }}" text-anchor="end" font-size="11" fill="#cbd5e1">{{ $tick['value'] }}</text>
-                                    @endforeach
-                                    <line x1="{{ $chartLeft }}" y1="{{ $chartTop }}" x2="{{ $chartLeft }}" y2="{{ $chartBottom }}" stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-                                    <line x1="{{ $chartLeft }}" y1="{{ $chartBottom }}" x2="{{ $chartRight }}" y2="{{ $chartBottom }}" stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-                                    @foreach ($xTicks as $tick)
-                                        <line x1="{{ $tick['x'] }}" y1="{{ $chartBottom }}" x2="{{ $tick['x'] }}" y2="{{ $chartBottom + 6 }}" stroke="rgba(255,255,255,0.25)" stroke-width="1" />
-                                        <text x="{{ $tick['x'] }}" y="{{ $chartBottom + 20 }}" text-anchor="middle" font-size="10" fill="#cbd5e1">{{ $tick['label'] }}</text>
-                                    @endforeach
-                                    @if ($hasWeather)
-                                        <polyline fill="none" stroke="#34d399" stroke-width="2" opacity="0.85" points="{{ $weatherPolyline }}" />
-                                    @endif
-                                    <polyline fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.85" points="{{ $newsPolyline }}" />
-                                    <polyline fill="none" stroke="#f87171" stroke-width="2" opacity="0.9" points="{{ $flightPolyline }}" />
-                                    <polyline fill="none" stroke="#93c5fd" stroke-width="3" points="{{ $combinedPolyline }}" />
-                                    @foreach ($chartPoints as $point)
-                                        <circle cx="{{ $point['x'] }}" cy="{{ $point['combined_y'] }}" r="4" fill="#ffffff" />
-                                    @endforeach
-                                    <text x="{{ $chartRight + 8 }}" y="{{ $toY(9) + 4 }}" font-size="10" fill="#fca5a5">Severe</text>
-                                    <text x="{{ $chartRight + 8 }}" y="{{ $toY(7) + 4 }}" font-size="10" fill="#fde68a">High</text>
-                                    <text x="{{ $chartRight + 8 }}" y="{{ $toY(4.5) + 4 }}" font-size="10" fill="#bfdbfe">Moderate</text>
-                                    <text x="{{ $chartRight + 8 }}" y="{{ $toY(1.5) + 4 }}" font-size="10" fill="#86efac">Low</text>
-                                </svg>
-                                <ul class="score-points">
-                                    @foreach ($points as $point)
+                                        @if (($citySources['weather']['average_temperature'] ?? null) !== null)
+                                            · avg temp {{ number_format((float) $citySources['weather']['average_temperature'], 1) }}C
+                                        @endif
+                                    </li>
+                                    <li>
+                                        News:
+                                        {{ $citySources['news']['articles_found'] ?? 0 }} article(s)
+                                        @if (!empty($citySources['news']['top_category']))
+                                            · top category {{ $citySources['news']['top_category'] }}
+                                        @endif
+                                    </li>
+                                    <li>
+                                        Flights:
+                                        {{ $citySources['flights']['total_records'] ?? 0 }} total
+                                        · {{ $citySources['flights']['delayed_records'] ?? 0 }} delayed
+                                        · {{ $citySources['flights']['cancelled_records'] ?? 0 }} cancelled
+                                        @if (($citySources['flights']['average_delay_minutes'] ?? null) !== null)
+                                            · avg delay {{ number_format((float) $citySources['flights']['average_delay_minutes'], 1) }} min
+                                        @endif
+                                    </li>
+                                    <li>
+                                        Airlines to {{ $cityRiskResult['base_airport_iata'] ?? 'destination' }}:
+                                        @if (!empty($citySources['flights']['airlines']))
+                                            {{ collect($citySources['flights']['airlines'])
+                                                ->map(fn (array $airline): string => ($airline['code'] ?? 'UNKNOWN').' ('.($airline['records'] ?? 0).')')
+                                                ->implode(', ') }}
+                                        @else
+                                            none found in the selected window
+                                        @endif
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div class="panel">
+                                <h3>Top Drivers</h3>
+                                <ol class="driver-list">
+                                    @forelse ($cityDrivers as $driver)
                                         <li>
-                                            <span>{{ $point['label'] }}</span>
-                                            <span>
-                                                Combined {{ number_format((float) $point['combined_score'], 2) }} ·
-                                                @if ($hasWeather)
-                                                    Weather {{ number_format((float) $point['weather_score'], 2) }} ·
-                                                @endif
-                                                News {{ number_format((float) $point['news_score'], 2) }} ·
-                                                Flight {{ number_format((float) ($point['flight_score'] ?? 0), 2) }}
-                                            </span>
+                                            <strong>{{ ucfirst(str_replace('_', ' ', $driver['factor'] ?? 'unknown')) }}</strong>
+                                            score {{ number_format((float) ($driver['component_score'] ?? 0), 2) }},
+                                            weighted contribution {{ number_format((float) ($driver['weighted_contribution'] ?? 0), 2) }},
+                                            source {{ $driver['source'] ?? 'unknown' }}
+                                        </li>
+                                    @empty
+                                        <li>No driver details available.</li>
+                                    @endforelse
+                                </ol>
+                            </div>
+
+                            <div class="panel">
+                                <h3>Freshness By Factor</h3>
+                                <ul class="result-list">
+                                    @forelse ($cityComponentAges as $factor => $age)
+                                        <li>
+                                            {{ ucfirst(str_replace('_', ' ', (string) $factor)) }}:
+                                            @if (!empty($age['as_of']))
+                                                {{ $age['minutes_old'] }} min old
+                                                ({{ \Illuminate\Support\Carbon::parse($age['as_of'])->toDayDateTimeString() }})
+                                            @else
+                                                no recent signal
+                                            @endif
+                                        </li>
+                                    @empty
+                                        <li>No freshness detail available.</li>
+                                    @endforelse
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="grid dual">
+                            <div class="panel">
+                                <h3>Daily Outlook</h3>
+                                <ul class="result-list">
+                                    @foreach (($cityRiskResult['daily_outlook'] ?? []) as $day)
+                                        <li>
+                                            {{ $day['travel_date'] }}:
+                                            {{ $day['route_label'] }} ·
+                                            score {{ number_format((float) ($day['score'] ?? 0), 2) }} ·
+                                            {{ strtoupper((string) ($day['risk_level'] ?? 'unknown')) }}
                                         </li>
                                     @endforeach
                                 </ul>
                             </div>
-                        @endif
+
+                            <div class="panel">
+                                <h3>Route Outlook</h3>
+                                <ul class="result-list">
+                                    @foreach (($cityRiskResult['route_outlook'] ?? []) as $route)
+                                        <li>
+                                            {{ $route['route_label'] }}:
+                                            top score {{ number_format((float) ($route['top_score'] ?? 0), 2) }}
+                                            on {{ $route['travel_date'] ?? 'n/a' }} ·
+                                            {{ strtoupper((string) ($route['risk_level'] ?? 'unknown')) }}
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3>Evaluation Summary</h3>
+                            <ul class="result-list">
+                                @foreach (($primaryAssessment['explanations'] ?? []) as $message)
+                                    <li>{{ $message }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
                     </div>
                 @else
                     <strong>{{ ucfirst($manualToolResult['tool']) }}</strong>
@@ -682,7 +768,7 @@
 
         <div class="grid dual">
             <div class="panel">
-                <h3>Query City Score</h3>
+                <h3>City Risk Window</h3>
                 <form method="POST" action="{{ route('admin.ops.triggers.city-score') }}">
                     @csrf
                     <label>
@@ -696,12 +782,17 @@
                     </label>
 
                     <label>
-                        Date
-                        <input type="date" name="query_date" value="">
+                        Time window
+                        <select name="time_window_hours">
+                            <option value="">Next {{ config('operations.v1_risk_window_hours', 72) }} hours</option>
+                            <option value="24">Next 24 hours</option>
+                            <option value="48">Next 48 hours</option>
+                            <option value="72">Next 72 hours</option>
+                        </select>
                     </label>
 
-                    <button type="submit">Get City Score</button>
-                    <p class="meta">City score uses weather, news, and flight disruption into the configured base airport. Scores run from 0 to 10, where higher means more disruption risk. Leave the date blank to see a projected daily graph for the next 30 days.</p>
+                    <button type="submit">Get City Risk</button>
+                    <p class="meta">Evaluates monitored routes from the selected city into the configured base airport over the near-term window and returns a readable risk assessment with confidence, freshness, drivers, probable no-show uplift, and recommended action.</p>
                 </form>
             </div>
 
@@ -924,6 +1015,81 @@
                             Finished: {{ $run->finished_at?->toDayDateTimeString() ?? 'In progress' }}
                         </td>
                         <td class="meta">{{ $run->error_message ?? 'None' }}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="6">
+                            <details>
+                                <summary>Run request / response details</summary>
+                                <div class="meta" style="margin-top: 10px;">
+                                    Request meta
+                                </div>
+                                <pre class="code-block">{{ json_encode($run->request_meta ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+
+                                <div class="meta" style="margin-top: 12px;">
+                                    Response meta
+                                </div>
+                                <pre class="code-block">{{ json_encode($run->response_meta ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+
+                                @if ($run->rawPayloads->isNotEmpty())
+                                    <div class="meta" style="margin-top: 12px;">
+                                        Raw payloads stored for this run
+                                    </div>
+
+                                    @foreach ($run->rawPayloads as $payload)
+                                        @php
+                                            $items = $payload->payload['items'] ?? [];
+                                            $criteria = $payload->payload['criteria'] ?? [];
+                                            $httpExchanges = $payload->payload['http_exchanges'] ?? [];
+                                        @endphp
+                                        <details>
+                                            <summary>
+                                                Payload {{ $payload->id }}
+                                                · fetched {{ $payload->fetched_at?->toDayDateTimeString() ?? 'n/a' }}
+                                                · items {{ is_countable($items) ? count($items) : 0 }}
+                                            </summary>
+
+                                            @if (!empty($httpExchanges))
+                                                @foreach ($httpExchanges as $index => $exchange)
+                                                    <div class="meta" style="margin-top: 10px;">
+                                                        API request payload #{{ $index + 1 }}
+                                                    </div>
+                                                    <pre class="code-block">{{ json_encode([
+                                                        'requested_at' => $exchange['requested_at'] ?? null,
+                                                        'method' => $exchange['method'] ?? null,
+                                                        'url' => $exchange['url'] ?? null,
+                                                        'request' => $exchange['request'] ?? [],
+                                                    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+
+                                                    <div class="meta" style="margin-top: 12px;">
+                                                        API response payload #{{ $index + 1 }}
+                                                    </div>
+                                                    <pre class="code-block">{{ json_encode($exchange['response'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                                @endforeach
+                                            @else
+                                                <div class="meta" style="margin-top: 10px;">
+                                                    API request payload
+                                                </div>
+                                                <pre class="code-block">{{ json_encode($criteria, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+
+                                                <div class="meta" style="margin-top: 12px;">
+                                                    API response payload
+                                                </div>
+                                                <pre class="code-block">{{ json_encode($items, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                            @endif
+
+                                            <div class="meta" style="margin-top: 12px;">
+                                                Normalized items stored
+                                            </div>
+                                            <pre class="code-block">{{ json_encode($items, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                        </details>
+                                    @endforeach
+                                @else
+                                    <div class="meta" style="margin-top: 12px;">
+                                        No raw payloads were stored for this run.
+                                    </div>
+                                @endif
+                            </details>
+                        </td>
                     </tr>
                 @empty
                     <tr>

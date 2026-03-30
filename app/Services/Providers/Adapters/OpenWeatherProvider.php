@@ -12,20 +12,25 @@ class OpenWeatherProvider extends ConfiguredHttpProvider implements WeatherProvi
 {
     public function fetchWeather(array $criteria = []): array
     {
+        $this->resetExchangeLog();
+
         $locationCode = strtoupper((string) ($criteria['location_code'] ?? ''));
         $airport = $this->airport($locationCode);
         $count = min(40, max(1, (int) ($criteria['date_window_days'] ?? 1)) * 8);
+        $query = [
+            'lat' => $airport->latitude,
+            'lon' => $airport->longitude,
+            'appid' => $this->requiredCredential('api_key'),
+            'units' => $this->optionalConfig('units', 'metric'),
+            'cnt' => $count,
+        ];
 
         $response = $this->client()
-            ->get('/data/2.5/forecast', [
-                'lat' => $airport->latitude,
-                'lon' => $airport->longitude,
-                'appid' => $this->requiredCredential('api_key'),
-                'units' => $this->optionalConfig('units', 'metric'),
-                'cnt' => $count,
-            ])
-            ->throw()
-            ->json();
+            ->get('/data/2.5/forecast', $query);
+
+        $this->recordExchange('GET', '/data/2.5/forecast', $query, [], $response);
+
+        $response = $response->throw()->json();
 
         $timezone = (string) ($criteria['timezone'] ?? $airport->timezone ?? 'UTC');
 

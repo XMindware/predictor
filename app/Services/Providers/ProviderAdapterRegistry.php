@@ -9,6 +9,7 @@ use App\Models\Provider;
 use App\Services\Providers\Adapters\FlightStatsProvider;
 use App\Services\Providers\Adapters\NewsApiProvider;
 use App\Services\Providers\Adapters\OpenWeatherProvider;
+use App\Services\Providers\Adapters\RssNewsProvider;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -39,8 +40,9 @@ class ProviderAdapterRegistry
         $this->ensureService($provider, 'news');
 
         return match ($provider->slug) {
-            'newsapi' => app()->make(NewsApiProvider::class, ['provider' => $provider]),
-            default => throw new RuntimeException(sprintf('No live news adapter is registered for provider [%s].', $provider->slug)),
+            'newsapi'   => app()->make(NewsApiProvider::class,  ['provider' => $provider]),
+            'rss-news'  => app()->make(RssNewsProvider::class,  ['provider' => $provider]),
+            default     => throw new RuntimeException(sprintf('No live news adapter is registered for provider [%s].', $provider->slug)),
         };
     }
 

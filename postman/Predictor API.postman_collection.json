@@ -3,7 +3,7 @@
     "_postman_id": "2cb54c6d-efed-4cc3-ae8e-9d3470b53353",
     "name": "Predictor API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Postman collection for Predictor API v1. Supports health checks, API token issuance, and Sanctum-protected endpoints."
+    "description": "Postman collection for Predictor API v1. Includes health, token management, risk assessment, and route risk. Risk endpoints are Sanctum-protected and limited to monitored routes within the next 72 hours."
   },
   "item": [
     {
@@ -39,6 +39,7 @@
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "if (pm.response.code === 201) {",
                   "  var data = pm.response.json();",
@@ -47,8 +48,7 @@
                   "    pm.collectionVariables.set('email', data.user.email);",
                   "  }",
                   "}"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
@@ -78,7 +78,7 @@
                 "tokens"
               ]
             },
-            "description": "Exchange valid user credentials for a Sanctum bearer token. Saves the returned token into the collection variable `apiToken`."
+            "description": "Exchange valid user credentials for a Sanctum bearer token. Saves the returned token into `apiToken`."
           },
           "response": []
         }
@@ -127,6 +127,7 @@
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "if (pm.response.code === 200) {",
                   "  var data = pm.response.json();",
@@ -134,8 +135,7 @@
                   "    pm.collectionVariables.set('tokenId', data.data[0].id);",
                   "  }",
                   "}"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
@@ -202,7 +202,98 @@
                 "{{tokenId}}"
               ]
             },
-            "description": "Revokes a token owned by the authenticated user. Use the `tokenId` variable or replace it manually."
+            "description": "Revokes a token owned by the authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/risk-assessment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{apiToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"origin_airport\": \"{{originAirport}}\",\n  \"destination_airport\": \"{{destinationAirport}}\",\n  \"travel_date\": \"{{travelDate}}\",\n  \"airline_code\": \"{{airlineCode}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/risk-assessment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "risk-assessment"
+              ]
+            },
+            "description": "Decision-oriented risk evaluation for a monitored route. Returns score, risk level, confidence, freshness, drivers, probable no-show uplift, and recommended action. Travel date must be within the next 72 hours."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/routes/risk",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{apiToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/routes/risk?destination={{destinationCode}}&date={{travelDate}}&limit={{routeLimit}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "routes",
+                "risk"
+              ],
+              "query": [
+                {
+                  "key": "destination",
+                  "value": "{{destinationCode}}"
+                },
+                {
+                  "key": "date",
+                  "value": "{{travelDate}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "{{routeLimit}}"
+                }
+              ]
+            },
+            "description": "Ranks monitored routes into a destination by risk. Returns route-level score, confidence, freshness, drivers, probable no-show uplift, and recommended action. Travel date must be within the next 72 hours."
           },
           "response": []
         }
@@ -217,7 +308,7 @@
     },
     {
       "key": "email",
-      "value": "test@example.com",
+      "value": "superadmin@predictor.local",
       "type": "string"
     },
     {
@@ -238,6 +329,36 @@
     {
       "key": "tokenId",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "originAirport",
+      "value": "JFK",
+      "type": "string"
+    },
+    {
+      "key": "destinationAirport",
+      "value": "CUN",
+      "type": "string"
+    },
+    {
+      "key": "destinationCode",
+      "value": "CUN",
+      "type": "string"
+    },
+    {
+      "key": "travelDate",
+      "value": "2026-03-22",
+      "type": "string"
+    },
+    {
+      "key": "airlineCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "routeLimit",
+      "value": "10",
       "type": "string"
     }
   ]

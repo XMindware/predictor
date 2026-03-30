@@ -7,6 +7,7 @@ use App\Models\City;
 use App\Models\CityIndicator;
 use App\Models\FlightEvent;
 use App\Models\IngestionRun;
+use App\Models\NewsEvent;
 use App\Models\Provider;
 use App\Models\RawProviderPayload;
 use App\Models\Route;
@@ -16,6 +17,8 @@ use App\Models\WeatherEvent;
 use App\Services\Indicators\AirportIndicatorBuilder;
 use App\Services\Indicators\CityIndicatorBuilder;
 use App\Services\Indicators\RouteIndicatorBuilder;
+use App\Services\MonitoredRouteService;
+use App\Services\Providers\Adapters\ConfiguredHttpProvider;
 use App\Services\Providers\Normalizers\FlightPayloadNormalizer;
 use App\Services\Providers\Normalizers\NewsPayloadNormalizer;
 use App\Services\Providers\Normalizers\WeatherPayloadNormalizer;
@@ -35,6 +38,7 @@ class ManualOpsService
         private readonly AirportIndicatorBuilder $airportIndicatorBuilder,
         private readonly CityIndicatorBuilder $cityIndicatorBuilder,
         private readonly RouteIndicatorBuilder $routeIndicatorBuilder,
+        private readonly MonitoredRouteService $monitoredRouteService,
         private readonly RiskScoringService $riskScoringService,
     ) {
     }
@@ -90,7 +94,13 @@ class ManualOpsService
     }
 
     /**
-     * @return array{route: string, providers: int, payloads: int, normalized_events: int}
+     * @return array{
+     *     route: string,
+     *     providers: int,
+     *     payloads: int,
+     *     normalized_events: int,
+     *     fetched_flights: array<int, array<string, mixed>>
+     * }
      */
     public function refetchFlightsForRoute(Route $route): array
     {
@@ -127,6 +137,10 @@ class ManualOpsService
                 '%s → %s',
                 $route->originAirport?->iata ?? 'n/a',
                 $route->destinationAirport?->iata ?? 'n/a'
+            ),
+            'fetched_flights' => $this->fetchedFlightsForPayloads(
+                $route,
+                collect($result['payload_ids'] ?? [])->filter()->map(fn ($id): int => (int) $id)->values(),
             ),
             ...$result,
         ];
@@ -165,17 +179,198 @@ class ManualOpsService
     /**
      * @return array<string, mixed>
      */
-    public function queryCityScore(City $city, ?string $date): array
+    public function queryCityScore(City $city, ?int $timeWindowHours = null): array
     {
         $city->loadMissing(['country', 'airports']);
         $baseAirport = $this->baseAirport();
-        $routesToBaseAirport = $this->routesToBaseAirport($city, $baseAirport);
+        $routesToBaseAirport = $this->monitoredRouteService->prioritized(
+            $this->routesToBaseAirport($city, $baseAirport),
+            (int) config('operations.v1_route_risk_limit', 10),
+        );
 
-        if ($routesToBaseAirport->isNotEmpty()) {
-            return $this->routeBackedCityScore($city, $baseAirport, $routesToBaseAirport, $date);
+        if ($routesToBaseAirport->isEmpty()) {
+            throw new RuntimeException('No monitored routes into the base airport are available for the selected city.');
         }
 
-        return $this->cityBackedCityScore($city, $baseAirport, $routesToBaseAirport, $date);
+        $windowHours = $timeWindowHours === null
+            ? (int) config('operations.v1_risk_window_hours', 72)
+            : min((int) config('operations.v1_risk_window_hours', 72), max(1, $timeWindowHours));
+        $windowStart = now();
+        $windowEnd = now()->copy()->addHours($windowHours);
+        $travelDates = collect(range(
+            0,
+            $windowStart->copy()->startOfDay()->diffInDays($windowEnd->copy()->startOfDay())
+        ))
+            ->map(fn (int $offset): Carbon => $windowStart->copy()->startOfDay()->addDays($offset))
+            ->values();
+
+        $assessments = $routesToBaseAirport
+            ->flatMap(function (Route $route) use ($travelDates): Collection {
+                $route->loadMissing(['originAirport.city', 'destinationAirport.city']);
+
+                return $travelDates->map(function (Carbon $travelDate) use ($route): array {
+                    $assessment = $this->riskScoringService->calculate(
+                        $route->originAirport,
+                        $route->destinationAirport,
+                        $travelDate->toDateString(),
+                    );
+
+                    $assessment['route_label'] = sprintf(
+                        '%s → %s',
+                        $route->originAirport?->iata ?? 'n/a',
+                        $route->destinationAirport?->iata ?? 'n/a'
+                    );
+                    $assessment['travel_date'] = $travelDate->toDateString();
+
+                    return $assessment;
+                });
+            })
+            ->sortByDesc('score')
+            ->values();
+
+        $primaryAssessment = $assessments->first();
+
+        if (! $primaryAssessment) {
+            throw new RuntimeException('No risk assessments could be produced for the selected city.');
+        }
+
+        return [
+            'city' => $city->name,
+            'country' => $city->country?->name,
+            'base_airport_iata' => $baseAirport->iata,
+            'window_hours' => $windowHours,
+            'from_time' => $windowStart->toIso8601String(),
+            'to_time' => $windowEnd->toIso8601String(),
+            'routes_evaluated' => $routesToBaseAirport->count(),
+            'assessments_evaluated' => $assessments->count(),
+            'assessment_type' => $primaryAssessment['assessment_type'],
+            'scoring_mode' => $primaryAssessment['scoring_mode'],
+            'product_framing' => $primaryAssessment['product_framing'],
+            'primary_assessment' => $primaryAssessment,
+            'source_details' => $this->cityRiskSourceDetails(
+                $city,
+                $routesToBaseAirport,
+                $windowStart,
+                $windowEnd,
+            ),
+            'daily_outlook' => $assessments
+                ->groupBy('travel_date')
+                ->map(function (Collection $items, string $travelDate): array {
+                    $top = $items->sortByDesc('score')->first();
+
+                    return [
+                        'travel_date' => $travelDate,
+                        'route_label' => $top['route_label'],
+                        'score' => $top['score'],
+                        'risk_level' => $top['risk_level'],
+                        'recommended_action' => $top['recommended_action']['code'] ?? null,
+                    ];
+                })
+                ->sortBy('travel_date')
+                ->values()
+                ->all(),
+            'route_outlook' => $assessments
+                ->groupBy('route_label')
+                ->map(function (Collection $items, string $routeLabel): array {
+                    $top = $items->sortByDesc('score')->first();
+
+                    return [
+                        'route_label' => $routeLabel,
+                        'top_score' => $top['score'],
+                        'risk_level' => $top['risk_level'],
+                        'travel_date' => $top['travel_date'],
+                    ];
+                })
+                ->sortByDesc('top_score')
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Route>  $routesToBaseAirport
+     * @return array<string, array<string, mixed>>
+     */
+    private function cityRiskSourceDetails(
+        City $city,
+        Collection $routesToBaseAirport,
+        Carbon $windowStart,
+        Carbon $windowEnd,
+    ): array {
+        $airportIds = $city->airports->pluck('id')->filter()->values();
+        $weatherEvents = WeatherEvent::query()
+            ->whereBetween('forecast_for', [$windowStart, $windowEnd])
+            ->where(function ($query) use ($airportIds, $city): void {
+                $query->where('city_id', $city->id);
+
+                if ($airportIds->isNotEmpty()) {
+                    $query->orWhereIn('airport_id', $airportIds);
+                }
+            })
+            ->get();
+
+        $newsEvents = NewsEvent::query()
+            ->whereBetween('published_at', [$windowStart, $windowEnd])
+            ->where(function ($query) use ($airportIds, $city): void {
+                $query->where('city_id', $city->id);
+
+                if ($airportIds->isNotEmpty()) {
+                    $query->orWhereIn('airport_id', $airportIds);
+                }
+            })
+            ->get();
+
+        $flightEvents = FlightEvent::query()
+            ->whereIn('route_id', $routesToBaseAirport->pluck('id'))
+            ->whereBetween('travel_date', [
+                $windowStart->copy()->startOfDay()->toDateString(),
+                $windowEnd->copy()->endOfDay()->toDateString(),
+            ])
+            ->get();
+
+        return [
+            'weather' => [
+                'source' => 'weather_events',
+                'events_found' => $weatherEvents->count(),
+                'top_condition' => $weatherEvents->groupBy('condition_code')
+                    ->sortByDesc(fn (Collection $items): int => $items->count())
+                    ->keys()
+                    ->first(),
+                'average_temperature' => $weatherEvents->isEmpty()
+                    ? null
+                    : round((float) $weatherEvents->avg('temperature'), 1),
+            ],
+            'news' => [
+                'source' => 'news_events',
+                'articles_found' => $newsEvents->count(),
+                'top_category' => $newsEvents->groupBy('category')
+                    ->sortByDesc(fn (Collection $items): int => $items->count())
+                    ->keys()
+                    ->first(),
+            ],
+            'flights' => [
+                'source' => 'flight_events',
+                'total_records' => $flightEvents->count(),
+                'delayed_records' => $flightEvents
+                    ->filter(fn (FlightEvent $event): bool => (float) ($event->delay_average_minutes ?? 0) > 0)
+                    ->count(),
+                'cancelled_records' => $flightEvents
+                    ->filter(fn (FlightEvent $event): bool => (float) ($event->cancellation_rate ?? 0) > 0)
+                    ->count(),
+                'average_delay_minutes' => $flightEvents->isEmpty()
+                    ? null
+                    : round((float) $flightEvents->avg('delay_average_minutes'), 1),
+                'airlines' => $flightEvents
+                    ->groupBy(fn (FlightEvent $event): string => $event->airline_code ?: 'UNKNOWN')
+                    ->map(fn (Collection $items, string $airlineCode): array => [
+                        'code' => $airlineCode,
+                        'records' => $items->count(),
+                    ])
+                    ->sortByDesc('records')
+                    ->values()
+                    ->all(),
+            ],
+        ];
     }
 
     /**
@@ -666,7 +861,13 @@ class ManualOpsService
 
     /**
      * @param  Collection<int, WatchTarget>  $watchTargets
-     * @return array{providers: int, payloads: int, normalized_events: int}
+     * @return array{
+     *     providers: int,
+     *     payloads: int,
+     *     normalized_events: int,
+     *     payload_ids: array<int, int>,
+     *     ingestion_run_ids: array<int, int>
+     * }
      */
     private function runManualIngestion(string $providerService, string $sourceType, Collection $watchTargets): array
     {
@@ -682,6 +883,8 @@ class ManualOpsService
 
         $payloadCount = 0;
         $normalizedEvents = 0;
+        $payloadIds = collect();
+        $ingestionRunIds = collect();
 
         foreach ($providers as $provider) {
             $providerPayloadCount = 0;
@@ -698,12 +901,15 @@ class ManualOpsService
                     'provider_slug' => $provider->slug,
                 ],
             ]);
+            $ingestionRunIds->push($ingestionRun->id);
 
             try {
                 foreach ($watchTargets as $watchTarget) {
-                    $items = $this->fetchItems($provider, $providerService, $watchTarget);
+                    $fetched = $this->fetchItems($provider, $providerService, $watchTarget);
+                    $items = $fetched['items'];
+                    $httpExchanges = $fetched['http_exchanges'];
 
-                    if ($items === []) {
+                    if ($items === [] && $httpExchanges === []) {
                         continue;
                     }
 
@@ -713,6 +919,7 @@ class ManualOpsService
                         'payload' => [
                             'watch_target_id' => $watchTarget->id,
                             'criteria' => $this->buildCriteria($provider, $providerService, $watchTarget),
+                            'http_exchanges' => $httpExchanges,
                             'items' => $this->normalizeItems($items),
                         ],
                         'fetched_at' => now(),
@@ -721,8 +928,11 @@ class ManualOpsService
 
                     $payloadCount++;
                     $providerPayloadCount++;
+                    $payloadIds->push($payload->id);
 
-                    $normalizedForPayload = $this->normalizePayload($providerService, $payload);
+                    $normalizedForPayload = $items === []
+                        ? 0
+                        : $this->normalizePayload($providerService, $payload);
 
                     $normalizedEvents += $normalizedForPayload;
                     $providerNormalizedEvents += $normalizedForPayload;
@@ -749,7 +959,38 @@ class ManualOpsService
             'providers' => $providers->count(),
             'payloads' => $payloadCount,
             'normalized_events' => $normalizedEvents,
+            'payload_ids' => $payloadIds->values()->all(),
+            'ingestion_run_ids' => $ingestionRunIds->values()->all(),
         ];
+    }
+
+    /**
+     * @param  Collection<int, int>  $payloadIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchedFlightsForPayloads(Route $route, Collection $payloadIds): array
+    {
+        if ($payloadIds->isEmpty()) {
+            return [];
+        }
+
+        return FlightEvent::query()
+            ->with('sourceProvider')
+            ->where('route_id', $route->id)
+            ->whereIn('raw_payload_id', $payloadIds->all())
+            ->orderBy('travel_date')
+            ->orderBy('event_time')
+            ->get()
+            ->map(fn (FlightEvent $event): array => [
+                'travel_date' => $event->travel_date?->toDateString(),
+                'airline_code' => $event->airline_code,
+                'delay_average_minutes' => $event->delay_average_minutes,
+                'cancellation_rate' => $event->cancellation_rate,
+                'disruption_score' => $event->disruption_score,
+                'summary' => $event->summary,
+                'provider' => $event->sourceProvider?->name,
+            ])
+            ->all();
     }
 
     /**
@@ -791,18 +1032,32 @@ class ManualOpsService
     }
 
     /**
-     * @return array<int, object|array<string, mixed>>
+     * @return array{items: array<int, object|array<string, mixed>>, http_exchanges: list<array<string, mixed>>}
      */
     private function fetchItems(Provider $provider, string $providerService, WatchTarget $watchTarget): array
     {
         $criteria = $this->buildCriteria($provider, $providerService, $watchTarget);
 
-        return match ($providerService) {
-            'weather' => $this->providerAdapterRegistry->weather($provider)->fetchWeather($criteria),
-            'flights' => $this->providerAdapterRegistry->flights($provider)->searchFlights($criteria),
-            'news' => $this->providerAdapterRegistry->news($provider)->fetchNews($criteria),
+        $adapter = match ($providerService) {
+            'weather' => $this->providerAdapterRegistry->weather($provider),
+            'flights' => $this->providerAdapterRegistry->flights($provider),
+            'news' => $this->providerAdapterRegistry->news($provider),
             default => throw new RuntimeException("Unsupported manual ingestion service [{$providerService}]."),
         };
+
+        $items = match ($providerService) {
+            'weather' => $adapter->fetchWeather($criteria),
+            'flights' => $adapter->searchFlights($criteria),
+            'news' => $adapter->fetchNews($criteria),
+            default => throw new RuntimeException("Unsupported manual ingestion service [{$providerService}]."),
+        };
+
+        return [
+            'items' => $items,
+            'http_exchanges' => $adapter instanceof ConfiguredHttpProvider
+                ? $adapter->pullExchangeLog()
+                : [],
+        ];
     }
 
     private function normalizePayload(string $providerService, RawProviderPayload $payload): int
@@ -846,6 +1101,10 @@ class ManualOpsService
     private function externalReference(array $items): ?string
     {
         $first = $items[0] ?? null;
+
+        if ($first === null) {
+            return null;
+        }
 
         if (is_array($first)) {
             return $first['external_reference'] ?? null;

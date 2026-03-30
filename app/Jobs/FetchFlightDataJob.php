@@ -27,7 +27,11 @@ class FetchFlightDataJob extends AbstractFetchProviderDataJob
 
     protected function fetchItems(ProviderAdapterRegistry $registry, Provider $provider, array $criteria): array
     {
-        return $registry->flights($provider)->searchFlights($criteria);
+        $adapter = $registry->flights($provider);
+        $items = $adapter->searchFlights($criteria);
+        $this->captureExchangeLog($adapter);
+
+        return $items;
     }
 
     protected function dispatchNormalization(RawProviderPayload $payload): void

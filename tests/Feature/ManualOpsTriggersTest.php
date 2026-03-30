@@ -86,8 +86,43 @@ class ManualOpsTriggersTest extends TestCase
             'route_id' => $route->id,
             'origin_airport_id' => $route->origin_airport_id,
             'destination_airport_id' => $route->destination_airport_id,
-            'airline_code' => 'XX',
+            'airline_code' => 'Y4',
         ]);
+
+        $this->actingAs($user)
+            ->followingRedirects()
+            ->post(route('admin.ops.triggers.flights'), [
+                'route_id' => $route->id,
+            ])
+            ->assertOk()
+            ->assertSee('Flight Fetch Result')
+            ->assertSee('Fetched Flights')
+            ->assertSee('Y4')
+            ->assertSee('Flight Y4100 from CUN to MID analyzed for disruption.');
+    }
+
+    public function test_manual_flight_refetch_persists_provider_request_and_response_for_debugging(): void
+    {
+        Carbon::setTestNow('2026-03-19 14:00:00');
+
+        $user = User::factory()->create();
+        [, , $route] = $this->setUpFlightFixture();
+
+        $this->actingAs($user)
+            ->post(route('admin.ops.triggers.flights'), [
+                'route_id' => $route->id,
+            ])
+            ->assertRedirect(route('admin.ops.index'))
+            ->assertSessionHas('status', 'Flight re-fetch completed for CUN → MID.');
+
+        $payload = RawProviderPayload::query()
+            ->where('source_type', 'flights')
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->assertNotEmpty($payload->payload['http_exchanges'] ?? []);
+        $this->assertSame('[REDACTED]', $payload->payload['http_exchanges'][0]['request']['query']['appId'] ?? null);
+        $this->assertIsArray($payload->payload['http_exchanges'][0]['response']['body']['flightStatuses'] ?? null);
     }
 
     public function test_authenticated_users_can_manually_refetch_news_for_a_city(): void
@@ -144,7 +179,7 @@ class ManualOpsTriggersTest extends TestCase
             'route_id' => $route->id,
             'origin_airport_id' => $route->origin_airport_id,
             'destination_airport_id' => $route->destination_airport_id,
-            'airline_code' => 'XX',
+            'airline_code' => 'Y4',
             'event_time' => now()->subHour(),
             'travel_date' => now()->addDays(7)->toDateString(),
             'cancellation_rate' => 1.0,
@@ -217,25 +252,29 @@ class ManualOpsTriggersTest extends TestCase
         ]);
     }
 
-    public function test_authenticated_users_can_query_city_score_from_the_ops_panel(): void
+    public function test_authenticated_users_can_query_city_risk_from_the_ops_panel(): void
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
+        config()->set('operations.base_airport_iata', 'CUN');
 
         $user = User::factory()->create();
-        [, $city] = $this->setUpCityIndicatorFixture();
+        $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)
             ->followingRedirects()
             ->post(route('admin.ops.triggers.city-score'), [
                 'city_id' => $city->id,
-                'query_date' => '2026-03-19',
+                'time_window_hours' => 72,
             ])
             ->assertOk()
-            ->assertSee('City Score Summary')
-            ->assertSee('Score scale: 0 to 3 means low disruption risk');
+            ->assertSee('City Risk Summary')
+            ->assertSee('Lead Route')
+            ->assertSee('Source Details')
+            ->assertSee('Daily Outlook')
+            ->assertSee('Route Outlook');
     }
 
-    public function test_city_score_includes_flights_into_the_configured_base_airport(): void
+    public function test_city_risk_uses_monitored_routes_into_the_configured_base_airport(): void
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
@@ -246,25 +285,29 @@ class ManualOpsTriggersTest extends TestCase
         $this->actingAs($user)
             ->post(route('admin.ops.triggers.city-score'), [
                 'city_id' => $city->id,
-                'query_date' => '2026-03-21',
+                'time_window_hours' => 72,
             ])
             ->assertRedirect(route('admin.ops.index'))
-            ->assertSessionHas('status', 'City score query completed for New York.')
+            ->assertSessionHas('status', 'City risk query completed for New York.')
             ->assertSessionHas('manual_tool_result', function (array $result): bool {
-                return $result['tool'] === 'query city score'
+                return $result['tool'] === 'query city risk'
                     && $result['details']['city'] === 'New York'
                     && $result['details']['base_airport_iata'] === 'CUN'
-                    && $result['details']['score_scope'] === 'route'
-                    && $result['details']['route_label'] === 'JFK → CUN'
-                    && $result['details']['news_score'] === 7.88
-                    && $result['details']['flight_score'] === 6.42
-                    && $result['details']['combined_score'] === 7.15
-                    && ! array_key_exists('weather_score', $result['details'])
-                    && $result['details']['flight_events'] === 1;
+                    && $result['details']['routes_evaluated'] === 1
+                    && $result['details']['window_hours'] === 72
+                    && ($result['details']['primary_assessment']['route_label'] ?? null) === 'JFK → CUN'
+                    && ($result['details']['source_details']['news']['articles_found'] ?? null) === 0
+                    && ($result['details']['source_details']['flights']['total_records'] ?? null) === 1
+                    && ($result['details']['source_details']['flights']['delayed_records'] ?? null) === 1
+                    && ($result['details']['source_details']['flights']['cancelled_records'] ?? null) === 1
+                    && ($result['details']['source_details']['flights']['airlines'][0]['code'] ?? null) === 'DL'
+                    && ($result['details']['source_details']['flights']['airlines'][0]['records'] ?? null) === 1
+                    && ! empty($result['details']['daily_outlook'])
+                    && ! empty($result['details']['route_outlook']);
             });
     }
 
-    public function test_route_backed_city_score_trend_matches_route_indicator_values(): void
+    public function test_city_risk_result_is_human_readable_for_the_selected_window(): void
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
         config()->set('operations.base_airport_iata', 'CUN');
@@ -276,40 +319,40 @@ class ManualOpsTriggersTest extends TestCase
             ->followingRedirects()
             ->post(route('admin.ops.triggers.city-score'), [
                 'city_id' => $city->id,
-                'query_date' => '',
+                'time_window_hours' => 72,
             ])
             ->assertOk()
-            ->assertSee('This graph is route-backed and follows')
+            ->assertSee('City Risk Summary')
             ->assertSee('JFK → CUN')
-            ->assertSee('Combined 7.15')
-            ->assertSee('News 7.88')
-            ->assertSee('Flight 6.42')
-            ->assertDontSee('Weather 7.90');
+            ->assertSee('Flights:')
+            ->assertSee('1 total')
+            ->assertSee('1 delayed')
+            ->assertSee('1 cancelled')
+            ->assertSee('Airlines to CUN:')
+            ->assertSee('DL (1)')
+            ->assertSee('Recommended Action')
+            ->assertSee('Probable No-show Uplift')
+            ->assertSee('Daily Outlook');
     }
 
-    public function test_authenticated_users_can_query_city_score_trend_when_no_date_is_selected(): void
+    public function test_city_risk_defaults_to_the_next_72_hours_when_no_window_is_selected(): void
     {
         Carbon::setTestNow('2026-03-19 14:00:00');
+        config()->set('operations.base_airport_iata', 'CUN');
 
         $user = User::factory()->create();
-        [, $city] = $this->setUpCityIndicatorTrendFixture();
+        $city = $this->setUpBaseAirportCityScoreFixture();
 
         $this->actingAs($user)
             ->followingRedirects()
             ->post(route('admin.ops.triggers.city-score'), [
                 'city_id' => $city->id,
-                'query_date' => '',
             ])
             ->assertOk()
-            ->assertSee('City Score Trend')
-            ->assertSee('Projected Daily Scores (0-10)')
-            ->assertSee('Combined')
-            ->assertSee('This graph combines city weather, city news, and flight disruption')
-            ->assertSee('projected for the next 30 days')
-            ->assertSee('from 2026-03-19 to 2026-04-17')
-            ->assertSee('Flight')
-            ->assertSee('Mar 19')
-            ->assertSee('Apr 17');
+            ->assertSee('City Risk Summary')
+            ->assertSee('next 72 hours')
+            ->assertSee('Lead Route')
+            ->assertSee('Evaluation Summary');
     }
 
     /**
@@ -580,6 +623,23 @@ class ManualOpsTriggersTest extends TestCase
 
     private function setUpBaseAirportCityScoreFixture(): City
     {
+        ScoringProfile::create([
+            'name' => 'Default',
+            'version' => 'v1',
+            'weights' => [
+                'flight' => 0.45,
+                'weather' => 0.30,
+                'news' => 0.20,
+                'date_proximity' => 0.05,
+            ],
+            'thresholds' => [
+                'low' => 3.0,
+                'medium' => 6.0,
+                'high' => 8.0,
+            ],
+            'active' => true,
+        ]);
+
         $us = Country::create([
             'name' => 'United States',
         ]);
@@ -626,6 +686,16 @@ class ManualOpsTriggersTest extends TestCase
             'active' => true,
         ]);
 
+        WatchTarget::create([
+            'origin_city_id' => $newYork->id,
+            'origin_airport_id' => $jfk->id,
+            'destination_city_id' => $cancun->id,
+            'destination_airport_id' => $cun->id,
+            'enabled' => true,
+            'monitoring_priority' => 10,
+            'date_window_days' => 3,
+        ]);
+
         $provider = Provider::create([
             'name' => 'FlightStats',
             'slug' => 'flightstats',
@@ -666,6 +736,36 @@ class ManualOpsTriggersTest extends TestCase
             'summary' => 'Seeded flight disruption outlook for JFK to CUN.',
             'source_provider_id' => $provider->id,
             'raw_payload_id' => $payload->id,
+        ]);
+
+        AirportIndicator::create([
+            'airport_id' => $jfk->id,
+            'as_of' => now()->startOfHour(),
+            'window_hours' => 24,
+            'weather_score' => 5.0,
+            'flight_score' => 6.0,
+            'news_score' => 5.0,
+            'combined_score' => 5.33,
+            'supporting_factors' => [
+                'weather' => ['events_count' => 2],
+                'flight' => ['events_count' => 1],
+                'news' => ['events_count' => 1],
+            ],
+        ]);
+
+        AirportIndicator::create([
+            'airport_id' => $cun->id,
+            'as_of' => now()->startOfHour(),
+            'window_hours' => 24,
+            'weather_score' => 4.0,
+            'flight_score' => 3.0,
+            'news_score' => 4.0,
+            'combined_score' => 3.67,
+            'supporting_factors' => [
+                'weather' => ['events_count' => 2],
+                'flight' => ['events_count' => 1],
+                'news' => ['events_count' => 1],
+            ],
         ]);
 
         RouteIndicator::create([

@@ -21,7 +21,7 @@ class StubFlightProvider implements FlightProviderInterface
                 externalReference: sprintf('flight:%s:%s-%s', $providerSlug, $originCode, $destinationCode),
                 departureAt: now()->addDay()->setHour(8)->toIso8601String(),
                 arrivalAt: now()->addDay()->setHour(11)->toIso8601String(),
-                carrierCode: 'XX',
+                carrierCode: 'Y4',
                 flightNumber: '100',
                 priceAmount: 199.99,
                 priceCurrency: 'USD',

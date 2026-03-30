@@ -10,6 +10,7 @@ use App\Models\Country;
 use App\Models\FailedJob;
 use App\Models\IngestionRun;
 use App\Models\Provider;
+use App\Models\RawProviderPayload;
 use App\Models\Route;
 use App\Models\RouteIndicator;
 use App\Models\User;
@@ -87,17 +88,56 @@ class AdminOpsPanelTest extends TestCase
             'date_window_days' => 14,
         ]);
 
-        IngestionRun::create([
+        $run = IngestionRun::create([
             'provider_id' => $provider->id,
             'source_type' => 'flight',
             'status' => 'failed',
             'started_at' => now()->subMinutes(20),
             'finished_at' => now()->subMinutes(18),
+            'request_meta' => [
+                'manual_trigger' => true,
+                'watch_target_ids' => [1],
+            ],
             'response_meta' => [
                 'payload_count' => 2,
                 'normalized_events' => 7,
             ],
             'error_message' => 'Provider timed out.',
+        ]);
+
+        RawProviderPayload::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flight',
+            'external_reference' => 'flight:opensky:test-1',
+            'payload' => [
+                'http_exchanges' => [[
+                    'requested_at' => now()->subMinutes(19)->toIso8601String(),
+                    'method' => 'GET',
+                    'url' => 'https://api.example.test/flights',
+                    'request' => [
+                        'query' => [
+                            'origin_code' => 'CUN',
+                            'destination_code' => 'MID',
+                            'date_window_days' => 3,
+                        ],
+                        'headers' => [],
+                    ],
+                    'response' => [
+                        'status' => 200,
+                        'body' => [
+                            'flightStatuses' => [],
+                        ],
+                    ],
+                ]],
+                'criteria' => [
+                    'origin_code' => 'CUN',
+                    'destination_code' => 'MID',
+                    'date_window_days' => 3,
+                ],
+                'items' => [],
+            ],
+            'fetched_at' => now()->subMinutes(19),
+            'ingestion_run_id' => $run->id,
         ]);
 
         AirportIndicator::create([
@@ -172,6 +212,15 @@ class AdminOpsPanelTest extends TestCase
             ->assertSee('4 events')
             ->assertSee('Payloads: 2')
             ->assertSee('Records created: 7')
+            ->assertSee('Run request / response details')
+            ->assertSee('API request payload')
+            ->assertSee('API response payload')
+            ->assertSee('https://api.example.test/flights')
+            ->assertSee('flightStatuses')
+            ->assertSee('origin_code')
+            ->assertSee('destination_code')
+            ->assertSee('MID')
+            ->assertSee('[]')
             ->assertSee('RuntimeException: Queue worker failed while processing payload.');
     }
 }

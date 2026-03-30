@@ -523,7 +523,7 @@ class RiskScoringService
                 return [
                     'factor' => $factor,
                     'as_of' => $timestamp->toIso8601String(),
-                    'minutes_old' => now()->diffInMinutes($timestamp, false) * -1,
+                    'minutes_old' => max(0, (int) round(now()->floatDiffInMinutes($timestamp, false) * -1)),
                 ];
             })
             ->values();

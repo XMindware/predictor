@@ -78,7 +78,7 @@ abstract class TestCase extends BaseTestCase
             'https://api.flightstats.com/flex/flightstatus/rest/v2/json/route/status/*' => Http::response([
                 'flightStatuses' => [[
                     'flightId' => 123456,
-                    'carrierFsCode' => 'XX',
+                    'carrierFsCode' => 'Y4',
                     'flightNumber' => '100',
                     'status' => 'S',
                     'departureAirportFsCode' => 'CUN',

@@ -17,9 +17,11 @@ use App\Models\City;
 use App\Models\CityIndicator;
 use App\Models\Country;
 use App\Models\FailedJob;
+use App\Models\FlightEvent;
 use App\Models\IngestionRun;
 use App\Models\Provider;
 use App\Models\RawProviderPayload;
+use App\Models\RiskQuerySnapshot;
 use App\Models\Route;
 use App\Models\RouteIndicator;
 use App\Support\PlatformHealth;
@@ -262,6 +264,160 @@ class SchedulerCommandsTest extends TestCase
         $this->assertSame('failed_jobs', $alerts[0]['type']);
         $this->assertSame('ingestion_run', $alerts[1]['type']);
         $this->assertSame('stale_data', $alerts[2]['type']);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_demo_data_clear_flights_command_removes_seeded_and_xx_flight_data_only(): void
+    {
+        Carbon::setTestNow('2026-03-19 14:00:00');
+
+        [$provider, $originAirport, $route] = $this->setUpGeographyFixture();
+
+        $seedRun = IngestionRun::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'status' => 'completed',
+            'started_at' => now()->subHour(),
+            'finished_at' => now()->subMinutes(50),
+            'error_message' => 'seed:flights',
+            'request_meta' => ['seeded' => true],
+            'response_meta' => ['seeded' => true],
+        ]);
+
+        $demoPayload = RawProviderPayload::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'external_reference' => 'seed:flight:CUN:MID:day-1',
+            'payload' => ['items' => []],
+            'fetched_at' => now()->subMinutes(50),
+            'normalized_at' => now()->subMinutes(49),
+            'ingestion_run_id' => $seedRun->id,
+        ]);
+
+        FlightEvent::create([
+            'route_id' => $route->id,
+            'origin_airport_id' => $route->origin_airport_id,
+            'destination_airport_id' => $route->destination_airport_id,
+            'airline_code' => 'Y4',
+            'event_time' => now()->subMinutes(49),
+            'travel_date' => now()->addDay()->toDateString(),
+            'cancellation_rate' => 0.0,
+            'delay_average_minutes' => 18.0,
+            'disruption_score' => 4.2,
+            'summary' => 'Seeded flight.',
+            'source_provider_id' => $provider->id,
+            'raw_payload_id' => $demoPayload->id,
+        ]);
+
+        RouteIndicator::create([
+            'route_id' => $route->id,
+            'as_of' => now()->startOfHour(),
+            'travel_date' => now()->addDay()->toDateString(),
+            'window_hours' => 24,
+            'flight_score' => 4.0,
+            'news_score' => 2.0,
+            'combined_score' => 3.0,
+            'supporting_factors' => [],
+        ]);
+
+        RiskQuerySnapshot::create([
+            'route_id' => $route->id,
+            'origin_airport_id' => $route->origin_airport_id,
+            'destination_airport_id' => $route->destination_airport_id,
+            'travel_date' => now()->addDay()->toDateString(),
+            'score' => 3.5,
+            'risk_level' => 'moderate',
+            'confidence_level' => 'high',
+            'factors' => [],
+            'generated_at' => now(),
+        ]);
+
+        $realRun = IngestionRun::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'status' => 'completed',
+            'started_at' => now()->subMinutes(40),
+            'finished_at' => now()->subMinutes(39),
+        ]);
+
+        $realPayload = RawProviderPayload::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'external_reference' => 'flight:flightstats:real-123',
+            'payload' => ['items' => []],
+            'fetched_at' => now()->subMinutes(39),
+            'normalized_at' => now()->subMinutes(38),
+            'ingestion_run_id' => $realRun->id,
+        ]);
+
+        FlightEvent::create([
+            'route_id' => $route->id,
+            'origin_airport_id' => $route->origin_airport_id,
+            'destination_airport_id' => $route->destination_airport_id,
+            'airline_code' => 'DL',
+            'event_time' => now()->subMinutes(38),
+            'travel_date' => now()->addDays(2)->toDateString(),
+            'cancellation_rate' => 0.0,
+            'delay_average_minutes' => 5.0,
+            'disruption_score' => 2.2,
+            'summary' => 'Real flight.',
+            'source_provider_id' => $provider->id,
+            'raw_payload_id' => $realPayload->id,
+        ]);
+
+        $xxRun = IngestionRun::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'status' => 'completed',
+            'started_at' => now()->subMinutes(35),
+            'finished_at' => now()->subMinutes(34),
+        ]);
+
+        $xxPayload = RawProviderPayload::create([
+            'provider_id' => $provider->id,
+            'source_type' => 'flights',
+            'external_reference' => 'flight:flightstats:xx-456',
+            'payload' => ['items' => []],
+            'fetched_at' => now()->subMinutes(34),
+            'normalized_at' => now()->subMinutes(33),
+            'ingestion_run_id' => $xxRun->id,
+        ]);
+
+        FlightEvent::create([
+            'route_id' => $route->id,
+            'origin_airport_id' => $route->origin_airport_id,
+            'destination_airport_id' => $route->destination_airport_id,
+            'airline_code' => 'XX',
+            'event_time' => now()->subMinutes(33),
+            'travel_date' => now()->addDays(3)->toDateString(),
+            'cancellation_rate' => 0.0,
+            'delay_average_minutes' => 0.0,
+            'disruption_score' => 1.5,
+            'summary' => 'Unknown XX flight.',
+            'source_provider_id' => $provider->id,
+            'raw_payload_id' => $xxPayload->id,
+        ]);
+
+        $this->artisan('demo-data:clear-flights')
+            ->expectsOutput('Deleted 2 demo or XX flight event(s).')
+            ->expectsOutput('Deleted 2 demo or XX raw payload(s).')
+            ->expectsOutput('Deleted 2 empty ingestion run(s).')
+            ->expectsOutput('Deleted 1 route indicator snapshot(s).')
+            ->expectsOutput('Deleted 1 risk snapshot(s).')
+            ->expectsOutput('Routes and watch targets were kept intact.')
+            ->assertSuccessful();
+
+        $this->assertDatabaseMissing('raw_provider_payloads', ['id' => $demoPayload->id]);
+        $this->assertDatabaseMissing('raw_provider_payloads', ['id' => $xxPayload->id]);
+        $this->assertDatabaseMissing('flight_events', ['raw_payload_id' => $demoPayload->id]);
+        $this->assertDatabaseMissing('flight_events', ['raw_payload_id' => $xxPayload->id]);
+        $this->assertDatabaseMissing('ingestion_runs', ['id' => $seedRun->id]);
+        $this->assertDatabaseMissing('ingestion_runs', ['id' => $xxRun->id]);
+
+        $this->assertDatabaseHas('raw_provider_payloads', ['id' => $realPayload->id]);
+        $this->assertDatabaseHas('flight_events', ['raw_payload_id' => $realPayload->id]);
+        $this->assertDatabaseHas('routes', ['id' => $route->id]);
 
         Carbon::setTestNow();
     }

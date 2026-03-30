@@ -11,6 +11,8 @@ class FlightStatsProvider extends ConfiguredHttpProvider implements FlightProvid
 {
     public function searchFlights(array $criteria = []): array
     {
+        $this->resetExchangeLog();
+
         $originCode = strtoupper((string) ($criteria['origin_code'] ?? ''));
         $destinationCode = strtoupper((string) ($criteria['destination_code'] ?? ''));
 
@@ -26,13 +28,17 @@ class FlightStatsProvider extends ConfiguredHttpProvider implements FlightProvid
         return collect(range(1, $daysAhead))
             ->flatMap(function (int $offset) use ($criteria, $originCode, $destinationCode): Collection {
                 $departureDate = Carbon::now()->addDays($offset);
+                $path = $this->routeStatusPath($originCode, $destinationCode, $departureDate);
+                $query = [
+                    'appId' => $this->requiredCredential('app_id'),
+                    'appKey' => $this->requiredCredential('app_key'),
+                    'utc' => 'false',
+                    'maxFlights' => $this->integerConfig('max_flights', 10),
+                ];
                 $response = $this->client()
-                    ->get($this->routeStatusPath($originCode, $destinationCode, $departureDate), [
-                        'appId' => $this->requiredCredential('app_id'),
-                        'appKey' => $this->requiredCredential('app_key'),
-                        'utc' => 'false',
-                        'maxFlights' => $this->integerConfig('max_flights', 10),
-                    ]);
+                    ->get($path, $query);
+
+                $this->recordExchange('GET', $path, $query, [], $response);
 
                 if ($response->status() === 404) {
                     return collect();

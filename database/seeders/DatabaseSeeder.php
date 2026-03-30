@@ -20,6 +20,13 @@ class DatabaseSeeder extends Seeder
             WeatherSourceSeeder::class,
             FlightSourceSeeder::class,
             NewsSourceSeeder::class,
+            // RSS news provider (supplements / replaces NewsAPI for city-targeted feeds)
+            RssNewsSourceSeeder::class,
+            // Auth / membership seeders (order matters: plans before demo users)
+            MembershipPlanSeeder::class,
+            VisitorDemoSeeder::class,
+            // Monitored destinations (seeded after geography so airport lookups work)
+            MonitoredDestinationSeeder::class,
         ]);
     }
 }

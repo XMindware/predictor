@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Airport;
 use App\Models\FlightEvent;
 use Database\Seeders\Concerns\SeedsDemoSourceData;
 use Illuminate\Database\Seeder;
@@ -22,10 +23,25 @@ class FlightSourceSeeder extends Seeder
             'MEX' => ['airline' => 'AM', 'base_disruption' => 3.9],
             'MIA' => ['airline' => 'AA', 'base_disruption' => 4.8],
             'MID' => ['airline' => 'Y4', 'base_disruption' => 3.4],
+            'GDL' => ['airline' => 'AM', 'base_disruption' => 4.1],
+            'MTY' => ['airline' => 'VB', 'base_disruption' => 4.4],
+            'PVR' => ['airline' => 'Y4', 'base_disruption' => 3.6],
+            'SJD' => ['airline' => 'Y4', 'base_disruption' => 4.0],
+            'TIJ' => ['airline' => 'VB', 'base_disruption' => 4.7],
+            'ATL' => ['airline' => 'DL', 'base_disruption' => 5.8],
+            'ORD' => ['airline' => 'UA', 'base_disruption' => 5.2],
+            'DFW' => ['airline' => 'AA', 'base_disruption' => 5.0],
+            'IAH' => ['airline' => 'UA', 'base_disruption' => 5.1],
+            'LAX' => ['airline' => 'AA', 'base_disruption' => 5.4],
+            'SFO' => ['airline' => 'UA', 'base_disruption' => 5.3],
+            'YYC' => ['airline' => 'WS', 'base_disruption' => 4.9],
+            'YUL' => ['airline' => 'AC', 'base_disruption' => 4.8],
+            'YYZ' => ['airline' => 'AC', 'base_disruption' => 5.0],
+            'YVR' => ['airline' => 'AC', 'base_disruption' => 5.1],
         ];
 
         foreach ($this->nonBaseAirports() as $originAirport) {
-            $profile = $originProfiles[$originAirport->iata] ?? ['airline' => 'XX', 'base_disruption' => 4.5];
+            $profile = $originProfiles[$originAirport->iata] ?? $this->defaultOriginProfile($originAirport);
             $route = $this->route(
                 $originAirport->iata,
                 $destinationAirport->iata,
@@ -98,5 +114,18 @@ class FlightSourceSeeder extends Seeder
                 );
             }
         }
+    }
+
+    /**
+     * @return array{airline: string, base_disruption: float}
+     */
+    private function defaultOriginProfile(Airport $originAirport): array
+    {
+        return match ($originAirport->country?->name) {
+            'Mexico' => ['airline' => 'AM', 'base_disruption' => 4.2],
+            'United States' => ['airline' => 'AA', 'base_disruption' => 5.0],
+            'Canada' => ['airline' => 'AC', 'base_disruption' => 4.9],
+            default => ['airline' => 'AM', 'base_disruption' => 4.5],
+        };
     }
 }
