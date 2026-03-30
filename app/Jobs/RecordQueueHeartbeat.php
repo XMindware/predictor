@@ -11,6 +11,11 @@ class RecordQueueHeartbeat implements ShouldQueue
 {
     use Queueable;
 
+    public function __construct()
+    {
+        $this->onConnection('database');
+    }
+
     /**
      * Execute the job.
      */

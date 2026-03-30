@@ -22,6 +22,11 @@ abstract class AbstractFetchProviderDataJob implements ShouldQueue
      */
     protected array $lastExchangeLog = [];
 
+    public function __construct()
+    {
+        $this->onConnection('database');
+    }
+
     public function handle(ProviderAdapterRegistry $registry): void
     {
         $watchTargets = $this->watchTargets();

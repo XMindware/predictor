@@ -20,6 +20,7 @@ class WarmPopularRoutesCacheJob implements ShouldQueue
         public int $limit = 10,
         public int $defaultTravelLeadDays = 7,
     ) {
+        $this->onConnection('database');
     }
 
     public function handle(

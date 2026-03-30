@@ -14,6 +14,7 @@ class NormalizeNewsPayloadJob implements ShouldQueue
     public function __construct(
         public int $rawProviderPayloadId,
     ) {
+        $this->onConnection('database');
     }
 
     public function handle(NewsPayloadNormalizer $normalizer): void

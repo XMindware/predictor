@@ -14,6 +14,7 @@ class NormalizeFlightPayloadJob implements ShouldQueue
     public function __construct(
         public int $rawProviderPayloadId,
     ) {
+        $this->onConnection('database');
     }
 
     public function handle(FlightPayloadNormalizer $normalizer): void

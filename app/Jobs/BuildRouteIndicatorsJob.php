@@ -13,6 +13,7 @@ class BuildRouteIndicatorsJob implements ShouldQueue
     public function __construct(
         public int $windowHours = 24,
     ) {
+        $this->onConnection('database');
     }
 
     public function handle(RouteIndicatorBuilder $builder): void
