@@ -16,6 +16,7 @@ use App\Models\FlightEvent;
 use App\Models\RawProviderPayload;
 use App\Models\RiskQuerySnapshot;
 use App\Models\RouteIndicator;
+use App\Models\User;
 use App\Models\WatchTarget;
 use App\Services\OperationsMonitoringService;
 use App\Services\StaleDataCheckService;
@@ -28,6 +29,138 @@ use Illuminate\Support\Facades\Schedule;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+$resolveUserFromConsole = function (string $identifier): ?User {
+    $identifier = trim($identifier);
+
+    if ($identifier === '') {
+        return null;
+    }
+
+    $query = User::query();
+
+    if (ctype_digit($identifier)) {
+        return $query->find((int) $identifier);
+    }
+
+    return $query->where('email', $identifier)->first();
+};
+
+Artisan::command(
+    'users:list {--role= : Filter by role} {--search= : Filter by name or email}',
+    function () use ($resolveUserFromConsole): int {
+        $query = User::query()->orderBy('id');
+
+        if ($role = $this->option('role')) {
+            if (! in_array($role, User::ROLES, true)) {
+                $this->error('Invalid role. Allowed roles: '.implode(', ', User::ROLES));
+
+                return 1;
+            }
+
+            $query->where('role', $role);
+        }
+
+        if ($search = trim((string) $this->option('search'))) {
+            $needle = '%'.mb_strtolower($search).'%';
+
+            $query->where(function ($q) use ($needle): void {
+                $q->whereRaw('LOWER(name) LIKE ?', [$needle])
+                    ->orWhereRaw('LOWER(email) LIKE ?', [$needle]);
+            });
+        }
+
+        $users = $query->get();
+
+        if ($users->isEmpty()) {
+            $this->info('No users found.');
+
+            return 0;
+        }
+
+        $this->table(
+            ['ID', 'Name', 'Email', 'Role', 'Verified'],
+            $users->map(fn (User $user) => [
+                $user->id,
+                $user->name,
+                $user->email,
+                $user->role,
+                $user->email_verified_at ? 'yes' : 'no',
+            ])->all()
+        );
+
+        $this->line('Total: '.$users->count().' user(s)');
+
+        return 0;
+    }
+)->purpose('List users with optional role and search filters');
+
+Artisan::command(
+    'users:update-password {user : User ID or email} {password : New password}',
+    function () use ($resolveUserFromConsole): int {
+        $identifier = (string) $this->argument('user');
+        $password = (string) $this->argument('password');
+        $user = $resolveUserFromConsole($identifier);
+
+        if (! $user) {
+            $this->error("User [{$identifier}] not found.");
+
+            return 1;
+        }
+
+        if (mb_strlen($password) < 8) {
+            $this->error('Password must be at least 8 characters.');
+
+            return 1;
+        }
+
+        $user->update(['password' => $password]);
+
+        $this->info("Password updated for {$user->email}.");
+
+        return 0;
+    }
+)->purpose('Update a user password by ID or email');
+
+Artisan::command(
+    'users:set-role {user : User ID or email} {role : '.User::ROLE_SUPER_ADMIN.'|'.User::ROLE_ADMIN.'|'.User::ROLE_MEMBER.'|'.User::ROLE_VISITOR.'}',
+    function () use ($resolveUserFromConsole): int {
+        $identifier = (string) $this->argument('user');
+        $role = (string) $this->argument('role');
+        $user = $resolveUserFromConsole($identifier);
+
+        if (! $user) {
+            $this->error("User [{$identifier}] not found.");
+
+            return 1;
+        }
+
+        if (! in_array($role, User::ROLES, true)) {
+            $this->error('Invalid role. Allowed roles: '.implode(', ', User::ROLES));
+
+            return 1;
+        }
+
+        if ($user->isSuperAdmin() && $role !== User::ROLE_SUPER_ADMIN) {
+            $otherSuperAdmins = User::query()
+                ->where('role', User::ROLE_SUPER_ADMIN)
+                ->where('id', '!=', $user->id)
+                ->count();
+
+            if ($otherSuperAdmins === 0) {
+                $this->error('Cannot demote the last super admin.');
+
+                return 1;
+            }
+        }
+
+        $user->update(['role' => $role]);
+
+        $this->info("Updated {$user->email} role to {$role}.");
+
+        return 0;
+    }
+)->purpose('Update a user role by ID or email');
 
 Artisan::command('ingestion:fetch-weather', function (): int {
     FetchWeatherDataJob::dispatch();

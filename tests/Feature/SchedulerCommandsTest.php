@@ -24,8 +24,10 @@ use App\Models\RawProviderPayload;
 use App\Models\RiskQuerySnapshot;
 use App\Models\Route;
 use App\Models\RouteIndicator;
+use App\Models\User;
 use App\Support\PlatformHealth;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
@@ -35,6 +37,69 @@ use Tests\TestCase;
 class SchedulerCommandsTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_users_list_command_displays_matching_users(): void
+    {
+        User::factory()->create([
+            'name' => 'Alice Admin',
+            'email' => 'alice@example.com',
+            'role' => User::ROLE_ADMIN,
+        ]);
+
+        User::factory()->create([
+            'name' => 'Victor Visitor',
+            'email' => 'victor@example.com',
+            'role' => User::ROLE_VISITOR,
+        ]);
+
+        $this->artisan('users:list --role=admin --search=alice')
+            ->expectsTable(
+                ['ID', 'Name', 'Email', 'Role', 'Verified'],
+                [[1, 'Alice Admin', 'alice@example.com', 'admin', 'yes']]
+            )
+            ->expectsOutput('Total: 1 user(s)')
+            ->assertSuccessful();
+    }
+
+    public function test_users_update_password_command_updates_the_selected_user(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'member@example.com',
+            'password' => 'old-password',
+        ]);
+
+        $this->artisan('users:update-password member@example.com new-secret-123')
+            ->expectsOutput('Password updated for member@example.com.')
+            ->assertSuccessful();
+
+        $user->refresh();
+
+        $this->assertTrue(Hash::check('new-secret-123', $user->password));
+    }
+
+    public function test_users_set_role_command_updates_role_and_protects_last_super_admin(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create([
+            'email' => 'super@example.com',
+        ]);
+        $admin = User::factory()->admin()->create([
+            'email' => 'admin@example.com',
+        ]);
+
+        $this->artisan('users:set-role admin@example.com member')
+            ->expectsOutput('Updated admin@example.com role to member.')
+            ->assertSuccessful();
+
+        $admin->refresh();
+        $this->assertSame(User::ROLE_MEMBER, $admin->role);
+
+        $this->artisan('users:set-role super@example.com admin')
+            ->expectsOutput('Cannot demote the last super admin.')
+            ->assertExitCode(1);
+
+        $superAdmin->refresh();
+        $this->assertSame(User::ROLE_SUPER_ADMIN, $superAdmin->role);
+    }
 
     public function test_fetch_commands_dispatch_ingestion_jobs(): void
     {
