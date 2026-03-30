@@ -27,9 +27,12 @@ return new class extends Migration
             $table->foreignId('raw_payload_id')->constrained('raw_provider_payloads')->cascadeOnDelete();
             $table->timestamps();
 
-            $table->index(['route_id', 'travel_date']);
-            $table->index(['origin_airport_id', 'destination_airport_id', 'event_time']);
-            $table->index(['source_provider_id', 'event_time']);
+            $table->index(['route_id', 'travel_date'], 'flight_events_route_travel_idx');
+            $table->index(
+                ['origin_airport_id', 'destination_airport_id', 'event_time'],
+                'flight_events_airports_event_idx'
+            );
+            $table->index(['source_provider_id', 'event_time'], 'flight_events_provider_event_idx');
         });
     }
 
