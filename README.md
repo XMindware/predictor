@@ -29,7 +29,7 @@ Internal admin:
 
 - Laravel 11
 - MySQL 8
-- Redis
+- database-backed cache, queue, and sessions
 - Sanctum for API tokens
 - queue worker for ingestion and aggregation jobs
 - Laravel Scheduler for recurring polling

@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Redis;
 use Tests\TestCase;
 
 class HealthEndpointTest extends TestCase
@@ -16,11 +15,9 @@ class HealthEndpointTest extends TestCase
         Config::set('app.name', 'Predictor');
         Config::set('database.default', 'mysql');
         Config::set('database.connections.mysql.database', 'predictor');
-        Config::set('database.redis.client', 'phpredis');
-        Config::set('database.redis.default.host', 'redis');
-        Config::set('queue.default', 'redis');
-        Config::set('queue.connections.redis.connection', 'default');
-        Config::set('queue.connections.redis.queue', 'default');
+        Config::set('cache.default', 'array');
+        Config::set('queue.default', 'database');
+        Config::set('queue.connections.database.queue', 'default');
         Config::set('cache.default', 'array');
 
         Cache::forever('health:scheduler:last_seen', now()->toIso8601String());
@@ -58,8 +55,6 @@ class HealthEndpointTest extends TestCase
             '2026_03_30_000002_create_rss_news_sources_table',
             '2026_03_30_000003_reattribute_news_events_to_destination_city',
         ]);
-        Redis::shouldReceive('connection->ping')->once()->withNoArgs()->andReturn('PONG');
-
         $this->getJson('/api/health')
             ->assertOk()
             ->assertJson([
@@ -72,11 +67,9 @@ class HealthEndpointTest extends TestCase
                         'connection' => 'mysql',
                         'database' => 'predictor',
                     ],
-                    'redis' => [
+                    'cache' => [
                         'status' => 'ok',
-                        'client' => 'phpredis',
-                        'connection' => 'default',
-                        'host' => 'redis',
+                        'store' => 'array',
                     ],
                     'migrations' => [
                         'status' => 'ok',
@@ -85,7 +78,7 @@ class HealthEndpointTest extends TestCase
                     ],
                     'queue' => [
                         'status' => 'ok',
-                        'connection' => 'redis',
+                        'connection' => 'database',
                         'queue' => 'default',
                         'max_age_seconds' => 180,
                     ],

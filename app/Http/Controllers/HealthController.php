@@ -7,7 +7,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -20,14 +19,14 @@ class HealthController extends Controller
     {
         $checks = [
             'database' => $this->databaseCheck(),
-            'redis' => $this->redisCheck(),
+            'cache' => $this->cacheCheck(),
             'migrations' => $this->migrationCheck(),
             'queue' => $this->heartbeatCheck(
                 PlatformHealth::QUEUE_WORKER_HEARTBEAT_CACHE_KEY,
                 (int) env('QUEUE_HEALTH_MAX_AGE', 180),
                 [
                     'connection' => config('queue.default'),
-                    'queue' => config('queue.connections.redis.queue'),
+                    'queue' => data_get(config('queue.connections'), config('queue.default').'.queue'),
                 ],
             ),
             'scheduler' => $this->heartbeatCheck(
@@ -75,26 +74,28 @@ class HealthController extends Controller
     }
 
     /**
-     * Check the Redis connection.
+     * Check the configured cache store.
      *
      * @return array<string, mixed>
      */
-    private function redisCheck(): array
+    private function cacheCheck(): array
     {
         try {
-            $connection = config('queue.connections.redis.connection', 'default');
-            $response = Redis::connection($connection)->ping();
+            $key = 'health:cache:test';
+            $value = now()->toIso8601String();
+
+            Cache::put($key, $value, now()->addMinute());
+            $cached = Cache::get($key);
+            Cache::forget($key);
 
             return [
-                'status' => in_array((string) $response, ['1', '+PONG', 'PONG'], true) ? 'ok' : 'error',
-                'client' => config('database.redis.client'),
-                'connection' => $connection,
-                'host' => config('database.redis.default.host'),
+                'status' => $cached === $value ? 'ok' : 'error',
+                'store' => config('cache.default', env('CACHE_STORE', 'database')),
             ];
         } catch (Throwable $exception) {
             return [
                 'status' => 'error',
-                'client' => config('database.redis.client'),
+                'store' => config('cache.default', env('CACHE_STORE', 'database')),
                 'message' => $exception->getMessage(),
             ];
         }
